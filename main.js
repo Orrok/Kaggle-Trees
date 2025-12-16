@@ -19,7 +19,7 @@ struct VertexOutput {
     @location(0) color: vec3<f32>,
 };
 
-@group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
+@group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 
 struct Uniforms {
@@ -830,6 +830,9 @@ async function runAllTests() {
 
 // Setup validation button handlers
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('hello-world').addEventListener('click', () => {
+        alert('Hello World! WebGPU Simulation Ready.');
+    });
     document.getElementById('test-all').addEventListener('click', runAllTests);
     document.getElementById('test-api').addEventListener('click', testWebGPUAPI);
     document.getElementById('test-adapter').addEventListener('click', testAdapter);
