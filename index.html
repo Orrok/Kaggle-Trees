@@ -62,12 +62,122 @@
             text-align: center;
             max-width: 500px;
         }
+        
+        .validation-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+            color: white;
+        }
+        
+        .validation-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #fff;
+        }
+        
+        .validation-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .validation-btn {
+            padding: 10px 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .validation-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .validation-btn:active {
+            transform: translateY(0);
+        }
+        
+        .validation-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .validation-output {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .validation-output.success {
+            border-left: 3px solid #10b981;
+        }
+        
+        .validation-output.error {
+            border-left: 3px solid #ef4444;
+        }
+        
+        .validation-output.info {
+            border-left: 3px solid #3b82f6;
+        }
+        
+        .test-result {
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        
+        .test-result.pass {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+        }
+        
+        .test-result.fail {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
     </style>
 </head>
 <body>
     <div class="info">
         <h1>WebGPU Particle Simulation</h1>
         <p>1000 particles in motion</p>
+    </div>
+    <div class="validation-panel">
+        <h2>WebGPU Validation Tests</h2>
+        <div class="validation-buttons">
+            <button class="validation-btn" id="test-all">Run All Tests</button>
+            <button class="validation-btn" id="test-api">Test WebGPU API</button>
+            <button class="validation-btn" id="test-adapter">Test Adapter</button>
+            <button class="validation-btn" id="test-device">Test Device</button>
+            <button class="validation-btn" id="test-buffer">Test Buffer</button>
+            <button class="validation-btn" id="test-compute">Test Compute Shader</button>
+            <button class="validation-btn" id="test-render">Test Render Pipeline</button>
+            <button class="validation-btn" id="test-texture">Test Texture</button>
+        </div>
+        <div class="validation-output info" id="validation-output">Click a button to run validation tests...</div>
     </div>
     <canvas id="canvas"></canvas>
     <script type="module" src="main.js"></script>

@@ -286,6 +286,26 @@ function createBindGroup(device, particleBuffer, uniformBuffer, computePipeline,
     return bindGroup;
 }
 
+function createRenderBindGroup(device, particleBuffer, uniformBuffer, renderPipeline) {
+    const bindGroupLayout = renderPipeline.getBindGroupLayout(0);
+    
+    const bindGroup = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: { buffer: particleBuffer },
+            },
+            {
+                binding: 1,
+                resource: { buffer: uniformBuffer },
+            },
+        ],
+    });
+    
+    return bindGroup;
+}
+
 async function main() {
     try {
         const { device, context, format, canvas } = await initWebGPU();
@@ -298,8 +318,9 @@ async function main() {
         const renderPipeline = createRenderPipeline(device, format);
         const computePipeline = createComputePipeline(device);
         
-        // Create bind group
-        const bindGroup = createBindGroup(device, particleBuffer, uniformBuffer, computePipeline, renderPipeline);
+        // Create bind groups
+        const computeBindGroup = createBindGroup(device, particleBuffer, uniformBuffer, computePipeline, renderPipeline);
+        const renderBindGroup = createRenderBindGroup(device, particleBuffer, uniformBuffer, renderPipeline);
         
         // Animation loop
         let lastTime = performance.now();
@@ -326,7 +347,7 @@ async function main() {
             const computeEncoder = device.createCommandEncoder();
             const computePass = computeEncoder.beginComputePass();
             computePass.setPipeline(computePipeline);
-            computePass.setBindGroup(0, bindGroup);
+            computePass.setBindGroup(0, computeBindGroup);
             computePass.dispatchWorkgroups(Math.ceil(NUM_PARTICLES / 64));
             computePass.end();
             
@@ -341,7 +362,7 @@ async function main() {
             });
             
             renderEncoder.setPipeline(renderPipeline);
-            renderEncoder.setBindGroup(0, bindGroup);
+            renderEncoder.setBindGroup(0, renderBindGroup);
             renderEncoder.draw(6 * NUM_PARTICLES); // 6 vertices per particle
             renderEncoder.end();
             
@@ -365,5 +386,458 @@ async function main() {
         console.error(error);
     }
 }
+
+// WebGPU Validation Functions
+let validationOutput = null;
+let webGPUContext = null;
+
+function logValidation(message, type = 'info') {
+    if (!validationOutput) {
+        validationOutput = document.getElementById('validation-output');
+    }
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ';
+    const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+    
+    validationOutput.className = `validation-output ${className}`;
+    validationOutput.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+    validationOutput.scrollTop = validationOutput.scrollHeight;
+}
+
+function clearValidationOutput() {
+    if (!validationOutput) {
+        validationOutput = document.getElementById('validation-output');
+    }
+    validationOutput.textContent = '';
+    validationOutput.className = 'validation-output info';
+}
+
+async function testWebGPUAPI() {
+    clearValidationOutput();
+    logValidation('Testing WebGPU API availability...', 'info');
+    
+    try {
+        if (!navigator.gpu) {
+            throw new Error('navigator.gpu is not available');
+        }
+        logValidation('✓ navigator.gpu is available', 'success');
+        
+        const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
+        logValidation(`✓ Preferred canvas format: ${preferredFormat}`, 'success');
+        
+        return { success: true, format: preferredFormat };
+    } catch (error) {
+        logValidation(`✗ WebGPU API test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testAdapter() {
+    clearValidationOutput();
+    logValidation('Testing GPU Adapter...', 'info');
+    
+    try {
+        if (!navigator.gpu) {
+            throw new Error('WebGPU not available');
+        }
+        
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw new Error('Failed to get adapter');
+        }
+        
+        logValidation('✓ Adapter obtained successfully', 'success');
+        
+        const features = Array.from(adapter.features);
+        logValidation(`✓ Adapter features (${features.length}): ${features.slice(0, 5).join(', ')}${features.length > 5 ? '...' : ''}`, 'success');
+        
+        const limits = adapter.limits;
+        logValidation(`✓ Max compute workgroup storage size: ${limits.maxComputeWorkgroupStorageSize}`, 'success');
+        logValidation(`✓ Max buffer size: ${(limits.maxBufferSize / 1024 / 1024).toFixed(2)} MB`, 'success');
+        logValidation(`✓ Max compute workgroup size X: ${limits.maxComputeWorkgroupSizeX}`, 'success');
+        
+        return { success: true, adapter };
+    } catch (error) {
+        logValidation(`✗ Adapter test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testDevice() {
+    clearValidationOutput();
+    logValidation('Testing GPU Device...', 'info');
+    
+    try {
+        const adapterResult = await testAdapter();
+        if (!adapterResult.success) {
+            throw new Error('Adapter not available');
+        }
+        
+        const adapter = adapterResult.adapter;
+        const device = await adapter.requestDevice();
+        if (!device) {
+            throw new Error('Failed to get device');
+        }
+        
+        logValidation('✓ Device obtained successfully', 'success');
+        
+        device.addEventListener('uncapturederror', (event) => {
+            logValidation(`⚠ Device error: ${event.error.message}`, 'error');
+        });
+        
+        const features = Array.from(device.features);
+        logValidation(`✓ Device features (${features.length}): ${features.slice(0, 5).join(', ')}${features.length > 5 ? '...' : ''}`, 'success');
+        
+        const limits = device.limits;
+        logValidation(`✓ Max buffer size: ${(limits.maxBufferSize / 1024 / 1024).toFixed(2)} MB`, 'success');
+        logValidation(`✓ Max compute workgroup size X: ${limits.maxComputeWorkgroupSizeX}`, 'success');
+        
+        webGPUContext = { adapter, device };
+        return { success: true, device, adapter };
+    } catch (error) {
+        logValidation(`✗ Device test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testBuffer() {
+    clearValidationOutput();
+    logValidation('Testing Buffer Creation and Readback...', 'info');
+    
+    try {
+        const deviceResult = await testDevice();
+        if (!deviceResult.success) {
+            throw new Error('Device not available');
+        }
+        
+        const device = deviceResult.device;
+        
+        // Create a buffer with test data
+        const testData = new Float32Array([1.0, 2.0, 3.0, 4.0, 5.0]);
+        const buffer = device.createBuffer({
+            size: testData.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        
+        logValidation('✓ Buffer created successfully', 'success');
+        logValidation(`✓ Buffer size: ${buffer.size} bytes`, 'success');
+        
+        // Write data to buffer
+        device.queue.writeBuffer(buffer, 0, testData);
+        logValidation('✓ Data written to buffer', 'success');
+        
+        // Read data back
+        const readBuffer = device.createBuffer({
+            size: testData.byteLength,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        
+        const encoder = device.createCommandEncoder();
+        encoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, testData.byteLength);
+        device.queue.submit([encoder.finish()]);
+        
+        await readBuffer.mapAsync(GPUMapMode.READ);
+        const mappedData = new Float32Array(readBuffer.getMappedRange());
+        readBuffer.unmap();
+        
+        const matches = Array.from(mappedData).every((val, i) => Math.abs(val - testData[i]) < 0.001);
+        
+        if (matches) {
+            logValidation(`✓ Buffer readback successful: [${Array.from(mappedData).join(', ')}]`, 'success');
+        } else {
+            throw new Error(`Data mismatch: expected [${Array.from(testData).join(', ')}], got [${Array.from(mappedData).join(', ')}]`);
+        }
+        
+        return { success: true };
+    } catch (error) {
+        logValidation(`✗ Buffer test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testComputeShader() {
+    clearValidationOutput();
+    logValidation('Testing Compute Shader...', 'info');
+    
+    try {
+        const deviceResult = await testDevice();
+        if (!deviceResult.success) {
+            throw new Error('Device not available');
+        }
+        
+        const device = deviceResult.device;
+        
+        // Simple compute shader that doubles values
+        const computeShaderCode = `
+            @group(0) @binding(0) var<storage, read_write> data: array<f32>;
+            
+            @compute @workgroup_size(64)
+            fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
+                let index = id.x;
+                if (index >= 10u) { return; }
+                data[index] = data[index] * 2.0;
+            }
+        `;
+        
+        const module = device.createShaderModule({ code: computeShaderCode });
+        logValidation('✓ Compute shader module created', 'success');
+        
+        const pipeline = device.createComputePipeline({
+            layout: 'auto',
+            compute: {
+                module,
+                entryPoint: 'cs_main',
+            },
+        });
+        logValidation('✓ Compute pipeline created', 'success');
+        
+        // Create test buffer
+        const testData = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        const buffer = device.createBuffer({
+            size: testData.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(buffer, 0, testData);
+        
+        // Create bind group
+        const bindGroup = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [{ binding: 0, resource: { buffer } }],
+        });
+        logValidation('✓ Bind group created', 'success');
+        
+        // Dispatch compute shader
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(Math.ceil(10 / 64));
+        pass.end();
+        device.queue.submit([encoder.finish()]);
+        logValidation('✓ Compute shader executed', 'success');
+        
+        // Read back results
+        const readBuffer = device.createBuffer({
+            size: testData.byteLength,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        
+        const readEncoder = device.createCommandEncoder();
+        readEncoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, testData.byteLength);
+        device.queue.submit([readEncoder.finish()]);
+        
+        await readBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(readBuffer.getMappedRange());
+        readBuffer.unmap();
+        
+        const expected = testData.map(x => x * 2);
+        const correct = Array.from(result).every((val, i) => Math.abs(val - expected[i]) < 0.001);
+        
+        if (correct) {
+            logValidation(`✓ Compute shader result correct: [${Array.from(result).slice(0, 5).join(', ')}...]`, 'success');
+        } else {
+            throw new Error(`Result mismatch: expected [${Array.from(expected).join(', ')}], got [${Array.from(result).join(', ')}]`);
+        }
+        
+        return { success: true };
+    } catch (error) {
+        logValidation(`✗ Compute shader test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testRenderPipeline() {
+    clearValidationOutput();
+    logValidation('Testing Render Pipeline...', 'info');
+    
+    try {
+        const deviceResult = await testDevice();
+        if (!deviceResult.success) {
+            throw new Error('Device not available');
+        }
+        
+        const device = deviceResult.device;
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('webgpu');
+        
+        if (!context) {
+            throw new Error('Failed to get WebGPU context');
+        }
+        
+        const format = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({
+            device,
+            format,
+        });
+        
+        logValidation('✓ Canvas context configured', 'success');
+        
+        // Simple render shaders
+        const vertexShader = `
+            @vertex
+            fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
+                let positions = array<vec2<f32>, 3>(
+                    vec2<f32>(0.0, 0.5),
+                    vec2<f32>(-0.5, -0.5),
+                    vec2<f32>(0.5, -0.5)
+                );
+                return vec4<f32>(positions[index], 0.0, 1.0);
+            }
+        `;
+        
+        const fragmentShader = `
+            @fragment
+            fn fs_main() -> @location(0) vec4<f32> {
+                return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+            }
+        `;
+        
+        const module = device.createShaderModule({ code: vertexShader + fragmentShader });
+        logValidation('✓ Shader module created', 'success');
+        
+        const pipeline = device.createRenderPipeline({
+            layout: 'auto',
+            vertex: {
+                module,
+                entryPoint: 'vs_main',
+            },
+            fragment: {
+                module,
+                entryPoint: 'fs_main',
+                targets: [{ format }],
+            },
+            primitive: {
+                topology: 'triangle-list',
+            },
+        });
+        logValidation('✓ Render pipeline created', 'success');
+        
+        // Render a frame
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                loadOp: 'clear',
+                clearValue: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
+                storeOp: 'store',
+            }],
+        });
+        pass.setPipeline(pipeline);
+        pass.draw(3);
+        pass.end();
+        device.queue.submit([encoder.finish()]);
+        
+        logValidation('✓ Render pass executed successfully', 'success');
+        logValidation('✓ A magenta triangle should be visible on the canvas', 'success');
+        
+        return { success: true };
+    } catch (error) {
+        logValidation(`✗ Render pipeline test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function testTexture() {
+    clearValidationOutput();
+    logValidation('Testing Texture Operations...', 'info');
+    
+    try {
+        const deviceResult = await testDevice();
+        if (!deviceResult.success) {
+            throw new Error('Device not available');
+        }
+        
+        const device = deviceResult.device;
+        
+        // Create a 2x2 texture
+        const texture = device.createTexture({
+            size: { width: 2, height: 2 },
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        logValidation('✓ Texture created (2x2 rgba8unorm)', 'success');
+        
+        // Write test data (red, green, blue, white)
+        const testData = new Uint8Array([
+            255, 0, 0, 255,  // Red
+            0, 255, 0, 255,  // Green
+            0, 0, 255, 255,  // Blue
+            255, 255, 255, 255 // White
+        ]);
+        
+        device.queue.writeTexture(
+            { texture },
+            testData,
+            { bytesPerRow: 8, rowsPerImage: 2 },
+            { width: 2, height: 2 }
+        );
+        logValidation('✓ Texture data written', 'success');
+        
+        // Create a sampler
+        const sampler = device.createSampler({
+            magFilter: 'linear',
+            minFilter: 'linear',
+        });
+        logValidation('✓ Sampler created', 'success');
+        
+        logValidation('✓ Texture operations successful', 'success');
+        
+        return { success: true };
+    } catch (error) {
+        logValidation(`✗ Texture test failed: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}
+
+async function runAllTests() {
+    clearValidationOutput();
+    logValidation('Running all WebGPU validation tests...', 'info');
+    logValidation('', 'info');
+    
+    const tests = [
+        { name: 'WebGPU API', fn: testWebGPUAPI },
+        { name: 'Adapter', fn: testAdapter },
+        { name: 'Device', fn: testDevice },
+        { name: 'Buffer', fn: testBuffer },
+        { name: 'Compute Shader', fn: testComputeShader },
+        { name: 'Render Pipeline', fn: testRenderPipeline },
+        { name: 'Texture', fn: testTexture },
+    ];
+    
+    let passed = 0;
+    let failed = 0;
+    
+    for (const test of tests) {
+        logValidation(`\n--- ${test.name} Test ---`, 'info');
+        const result = await test.fn();
+        if (result.success) {
+            passed++;
+        } else {
+            failed++;
+        }
+        // Small delay between tests
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    logValidation(`\n=== Test Summary ===`, 'info');
+    logValidation(`✓ Passed: ${passed}`, 'success');
+    if (failed > 0) {
+        logValidation(`✗ Failed: ${failed}`, 'error');
+    }
+    logValidation(`Total: ${tests.length}`, 'info');
+}
+
+// Setup validation button handlers
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('test-all').addEventListener('click', runAllTests);
+    document.getElementById('test-api').addEventListener('click', testWebGPUAPI);
+    document.getElementById('test-adapter').addEventListener('click', testAdapter);
+    document.getElementById('test-device').addEventListener('click', testDevice);
+    document.getElementById('test-buffer').addEventListener('click', testBuffer);
+    document.getElementById('test-compute').addEventListener('click', testComputeShader);
+    document.getElementById('test-render').addEventListener('click', testRenderPipeline);
+    document.getElementById('test-texture').addEventListener('click', testTexture);
+});
 
 main();
