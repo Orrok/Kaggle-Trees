@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Particle Swarm - Kaggle Christmas Tree Playground</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #020205; 
+            color: #fff; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; 
+            touch-action: none;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 300px;
+        }
+
+        .hud-item {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 10px 16px;
+            border-radius: 12px;
+            border-left: 3px solid #00e5ff;
+            font-size: 14px;
+            letter-spacing: 1px;
+            text-shadow: 0 0 5px rgba(0, 229, 255, 0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            pointer-events: auto;
+        }
+
+        .title { font-weight: bold; color: #fff; border-color: #ff0055; font-size: 16px; }
+        .fps { color: #aaa; flex-direction: row; justify-content: space-between; }
+        
+        .controls { border-color: #2979ff; }
+        
+        input[type=range] {
+            width: 100%;
+            accent-color: #00e5ff;
+            cursor: pointer;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        button {
+            padding: 15px 40px;
+            background: linear-gradient(45deg, #00e5ff, #2979ff);
+            border: none;
+            border-radius: 30px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <div class="hud-item title">NEON SWARM</div>
+        <div class="hud-item fps">
+            <span>FPS: <span id="fps-val">--</span></span>
+            <span id="count-display">30k</span>
+        </div>
+        <div class="hud-item controls">
+            <label for="particle-slider">Particle Count</label>
+            <input type="range" id="particle-slider" min="10000" max="1000000" step="10000" value="30000">
+        </div>
+    </div>
+
+    <div id="start-screen">
+        <button id="btn-start">INITIALIZE SYSTEM</button>
+    </div>
+
+    <canvas id="gpuCanvas"></canvas>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>

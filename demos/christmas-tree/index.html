@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Christmas Tree - Kaggle Christmas Tree Playground</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: linear-gradient(180deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a1a 100%);
+            color: #fff; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; 
+        }
+        canvas { 
+            display: block; 
+            width: 100vw; 
+            height: 100vh; 
+        }
+        
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 15px 20px;
+            border-radius: 12px;
+            border-left: 3px solid #00ff88;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        #info h2 {
+            color: #00ff88;
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>🎄 Kaggle Christmas Tree</h2>
+        <div>15-line reference tree rendered with WebGPU</div>
+    </div>
+    <canvas id="gpuCanvas"></canvas>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
