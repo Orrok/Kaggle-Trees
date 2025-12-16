@@ -2,185 +2,102 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebGPU Particle Simulation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGPU Swarm</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        body { 
+            margin: 0; 
+            background: #020205; 
+            color: #fff; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; 
+            touch-action: none;
         }
+        canvas { display: block; width: 100vw; height: 100vh; }
         
-        body {
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        }
-        
-        #canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
-        }
-        
-        .info {
+        #ui-overlay {
             position: absolute;
             top: 20px;
             left: 20px;
-            color: white;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 15px 20px;
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
-            z-index: 10;
-        }
-        
-        .info h1 {
-            font-size: 24px;
-            margin-bottom: 8px;
-        }
-        
-        .info p {
-            font-size: 14px;
-            opacity: 0.9;
-        }
-        
-        .error {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            background: rgba(220, 38, 38, 0.9);
-            padding: 20px 30px;
-            border-radius: 8px;
-            text-align: center;
-            max-width: 500px;
-        }
-        
-        .validation-panel {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
-            z-index: 100;
-            max-width: 400px;
-            max-height: 80vh;
-            overflow-y: auto;
-            color: white;
-        }
-        
-        .validation-panel h2 {
-            font-size: 18px;
-            margin-bottom: 15px;
-            color: #fff;
-        }
-        
-        .validation-buttons {
+            pointer-events: none;
             display: flex;
             flex-direction: column;
             gap: 10px;
-            margin-bottom: 15px;
+            width: 300px;
         }
-        
-        .validation-btn {
-            padding: 10px 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            border-radius: 6px;
-            color: white;
-            cursor: pointer;
+
+        .hud-item {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 10px 16px;
+            border-radius: 12px;
+            border-left: 3px solid #00e5ff;
             font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s;
+            letter-spacing: 1px;
+            text-shadow: 0 0 5px rgba(0, 229, 255, 0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            pointer-events: auto; /* Allow slider interaction */
         }
+
+        .title { font-weight: bold; color: #fff; border-color: #ff0055; font-size: 16px; }
+        .fps { color: #aaa; flex-direction: row; justify-content: space-between; }
         
-        .validation-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
+        .controls { border-color: #2979ff; }
         
-        .validation-btn:active {
-            transform: translateY(0);
+        input[type=range] {
+            width: 100%;
+            accent-color: #00e5ff;
+            cursor: pointer;
         }
-        
-        .validation-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
         }
-        
-        .validation-output {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 12px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            line-height: 1.6;
-            max-height: 300px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+
+        button {
+            padding: 15px 40px;
+            background: linear-gradient(45deg, #00e5ff, #2979ff);
+            border: none;
+            border-radius: 30px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        
-        .validation-output.success {
-            border-left: 3px solid #10b981;
-        }
-        
-        .validation-output.error {
-            border-left: 3px solid #ef4444;
-        }
-        
-        .validation-output.info {
-            border-left: 3px solid #3b82f6;
-        }
-        
-        .test-result {
-            margin-top: 8px;
-            padding: 8px;
-            border-radius: 4px;
-            font-size: 11px;
-        }
-        
-        .test-result.pass {
-            background: rgba(16, 185, 129, 0.2);
-            color: #6ee7b7;
-        }
-        
-        .test-result.fail {
-            background: rgba(239, 68, 68, 0.2);
-            color: #fca5a5;
-        }
+        button:active { transform: scale(0.95); }
     </style>
 </head>
 <body>
-    <div class="info">
-        <h1>WebGPU Particle Simulation</h1>
-        <p>1000 particles in motion</p>
-    </div>
-    <div class="validation-panel">
-        <h2>WebGPU Validation Tests</h2>
-        <div class="validation-buttons">
-            <button class="validation-btn" id="hello-world">Hello World</button>
-            <button class="validation-btn" id="test-all">Run All Tests</button>
-            <button class="validation-btn" id="test-api">Test WebGPU API</button>
-            <button class="validation-btn" id="test-adapter">Test Adapter</button>
-            <button class="validation-btn" id="test-device">Test Device</button>
-            <button class="validation-btn" id="test-buffer">Test Buffer</button>
-            <button class="validation-btn" id="test-compute">Test Compute Shader</button>
-            <button class="validation-btn" id="test-render">Test Render Pipeline</button>
-            <button class="validation-btn" id="test-texture">Test Texture</button>
+
+    <div id="ui-overlay">
+        <div class="hud-item title">NEON SWARM</div>
+        <div class="hud-item fps">
+            <span>FPS: <span id="fps-val">--</span></span>
+            <span id="count-display">30k</span>
         </div>
-        <div class="validation-output info" id="validation-output">Click a button to run validation tests...</div>
+        <div class="hud-item controls">
+            <label for="particle-slider">Particle Count</label>
+            <input type="range" id="particle-slider" min="10000" max="1000000" step="10000" value="30000">
+        </div>
     </div>
-    <canvas id="canvas"></canvas>
+
+    <div id="start-screen">
+        <button id="btn-start">INITIALIZE SYSTEM</button>
+    </div>
+
+    <canvas id="gpuCanvas"></canvas>
+
     <script type="module" src="main.js"></script>
 </body>
 </html>
