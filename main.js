@@ -189,7 +189,7 @@ function createParticleBuffer(device, width, height) {
     
     const buffer = device.createBuffer({
         size: NUM_PARTICLES * particleSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
     // Initialize particles with random positions and velocities
@@ -310,6 +310,18 @@ async function main() {
     try {
         const { device, context, format, canvas } = await initWebGPU();
         
+        // Add error listener for WebGPU validation errors
+        device.addEventListener('uncapturederror', (event) => {
+            console.error('WebGPU uncaptured error:', event.error);
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.innerHTML = `
+                <h2>WebGPU Validation Error</h2>
+                <p>${event.error.message}</p>
+            `;
+            document.body.appendChild(errorDiv);
+        });
+        
         // Create buffers
         const particleBuffer = createParticleBuffer(device, canvas.width, canvas.height);
         const uniformBuffer = createUniformBuffer(device);
@@ -326,49 +338,60 @@ async function main() {
         let lastTime = performance.now();
         
         function animate() {
-            const currentTime = performance.now();
-            const deltaTime = (currentTime - lastTime) / 1000.0;
-            lastTime = currentTime;
-            
-            // Update uniforms
-            const uniformData = new Float32Array([
-                currentTime / 1000.0, // time
-                deltaTime, // deltaTime
-                canvas.width, // resolution.x
-                canvas.height, // resolution.y
-                0.0, // gravity.x
-                50.0, // gravity.y
-                0.0, // padding
-                0.0, // padding
-            ]);
-            device.queue.writeBuffer(uniformBuffer, 0, uniformData);
-            
-            // Compute pass
-            const computeEncoder = device.createCommandEncoder();
-            const computePass = computeEncoder.beginComputePass();
-            computePass.setPipeline(computePipeline);
-            computePass.setBindGroup(0, computeBindGroup);
-            computePass.dispatchWorkgroups(Math.ceil(NUM_PARTICLES / 64));
-            computePass.end();
-            
-            // Render pass
-            const renderEncoder = computeEncoder.beginRenderPass({
-                colorAttachments: [{
-                    view: context.getCurrentTexture().createView(),
-                    loadOp: 'clear',
-                    clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
-                    storeOp: 'store',
-                }],
-            });
-            
-            renderEncoder.setPipeline(renderPipeline);
-            renderEncoder.setBindGroup(0, renderBindGroup);
-            renderEncoder.draw(6 * NUM_PARTICLES); // 6 vertices per particle
-            renderEncoder.end();
-            
-            device.queue.submit([computeEncoder.finish()]);
-            
-            requestAnimationFrame(animate);
+            try {
+                const currentTime = performance.now();
+                const deltaTime = (currentTime - lastTime) / 1000.0;
+                lastTime = currentTime;
+                
+                // Update uniforms
+                const uniformData = new Float32Array([
+                    currentTime / 1000.0, // time
+                    deltaTime, // deltaTime
+                    canvas.width, // resolution.x
+                    canvas.height, // resolution.y
+                    0.0, // gravity.x
+                    50.0, // gravity.y
+                    0.0, // padding
+                    0.0, // padding
+                ]);
+                device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+                
+                // Compute pass
+                const computeEncoder = device.createCommandEncoder();
+                const computePass = computeEncoder.beginComputePass();
+                computePass.setPipeline(computePipeline);
+                computePass.setBindGroup(0, computeBindGroup);
+                computePass.dispatchWorkgroups(Math.ceil(NUM_PARTICLES / 64));
+                computePass.end();
+                
+                // Render pass
+                const renderEncoder = computeEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        loadOp: 'clear',
+                        clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+                        storeOp: 'store',
+                    }],
+                });
+                
+                renderEncoder.setPipeline(renderPipeline);
+                renderEncoder.setBindGroup(0, renderBindGroup);
+                renderEncoder.draw(6 * NUM_PARTICLES); // 6 vertices per particle
+                renderEncoder.end();
+                
+                device.queue.submit([computeEncoder.finish()]);
+                
+                requestAnimationFrame(animate);
+            } catch (error) {
+                console.error('Animation error:', error);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.innerHTML = `
+                    <h2>Animation Error</h2>
+                    <p>${error.message}</p>
+                `;
+                document.body.appendChild(errorDiv);
+            }
         }
         
         animate();
