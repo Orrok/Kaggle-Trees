@@ -1,0 +1,747 @@
+Review this code
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGPU Tree Packer (Graph)</title>
+    <style>
+        body { margin: 0; background: #050505; color: #fff; font-family: 'Segoe UI', monospace; overflow: hidden; }
+        
+        /* LAYERS */
+        #layer-container { position: relative; width: 100vw; height: 100vh; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #gpuCanvas { z-index: 1; }
+        #overlayCanvas { z-index: 2; pointer-events: none; }
+        
+        /* HUD */
+        #top-bar {
+            position: absolute; top: 0; left: 0; width: 100%;
+            background: rgba(10, 10, 10, 0.85); 
+            border-bottom: 1px solid #444;
+            display: flex; justify-content: center; gap: 40px;
+            padding: 10px 0; z-index: 20; backdrop-filter: blur(4px);
+            font-family: 'Courier New', monospace;
+        }
+        
+        .hud-item { text-align: center; }
+        .hud-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 2px;}
+        .hud-val { font-size: 18px; font-weight: bold; color: #fff; }
+        
+        .val-valid { color: #4fd1c5; text-shadow: 0 0 10px rgba(79, 209, 197, 0.3); }
+        .val-relax { color: #f6ad55; }
+        .val-best { color: #f6e05e; }
+
+        /* UI */
+        #ui-container { position: absolute; top: 70px; left: 10px; z-index: 30; transition: transform 0.3s ease; }
+        #ui-container.hidden { transform: translateX(-120%); }
+        #ui {
+            background: rgba(20, 20, 20, 0.95); padding: 15px; 
+            border-radius: 8px; border: 1px solid #444; width: 240px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+        }
+        #menu-toggle {
+            position: absolute; top: 70px; left: 10px; background: #333; border: 1px solid #555; color: #fff;
+            width: 40px; height: 40px; border-radius: 8px; cursor: pointer; z-index: 30; display: flex; 
+            align-items: center; justify-content: center; font-size: 20px;
+        }
+        #menu-toggle:hover { background: #444; }
+        
+        h3 { margin: 0 0 15px 0; font-size: 14px; color: #aaa; text-align: center; border-bottom: 1px solid #444; padding-bottom: 8px; }
+        button, input[type="number"] {
+            background: #333; color: white; border: 1px solid #555;
+            padding: 8px; margin: 5px 0; cursor: pointer; width: 100%;
+            border-radius: 4px; box-sizing: border-box; font-size: 13px;
+        }
+        input[type="range"] { width: 100%; margin: 8px 0; cursor: pointer; accent-color: #4fd1c5; }
+        .row { display: flex; gap: 8px; align-items: center; }
+        label { font-size: 11px; color: #aaa; display: flex; justify-content: space-between; margin-top: 8px; text-transform: uppercase; }
+        #stats { margin-top:10px; font-size:10px; color: #666; text-align: center; }
+        
+        #debug { position: absolute; bottom: 10px; left: 10px; color: #4fd1c5; font-size: 12px; pointer-events: none; opacity: 0.8; font-weight: bold; z-index: 40; }
+    </style>
+</head>
+<body>
+
+<div id="top-bar">
+    <div class="hud-item">
+        <span class="hud-label">FPS</span>
+        <span class="hud-val" id="hudFPS">0</span>
+    </div>
+    <div class="hud-item">
+        <span class="hud-label">Mode</span>
+        <span class="hud-val" id="hudStatus">--</span>
+    </div>
+    <div class="hud-item">
+        <span class="hud-label">Score (Area/N)</span>
+        <span class="hud-val" id="hudCurrent">0.00</span>
+    </div>
+    <div class="hud-item">
+        <span class="hud-label">Best</span>
+        <span class="hud-val val-best" id="hudBest">--</span>
+    </div>
+</div>
+
+<div id="menu-toggle">☰</div>
+
+<div id="ui-container" style="left: 60px;">
+    <div id="ui">
+        <h3>CONTROLS</h3>
+        
+        <label>Tree Count</label>
+        <div class="row">
+            <input type="number" id="nInput" value="10" min="2" max="5000" step="1">
+            <button id="btnRestart" style="width: 50%">Spawn</button>
+        </div>
+        
+        <label>Simulation</label>
+        <div class="row">
+            <button id="btnPlay">▶ Play</button>
+            <button id="btnPause">⏸ Pause</button>
+        </div>
+        <button id="btnStep">Step</button>
+
+        <label>Zoom <span id="valZoom">2.0</span></label>
+        <input type="range" id="rngZoom" min="0.1" max="10.0" step="0.1" value="2.0">
+
+        <label style="color:#f6e05e">Compression <span id="valComp">1.0</span></label>
+        <input type="range" id="rngComp" min="0.0" max="5.0" step="0.1" value="1.0">
+        
+        <div id="stats">Auto-Balance: X/Y</div>
+    </div>
+</div>
+
+<div id="debug">Initializing...</div>
+
+<div id="layer-container">
+    <canvas id="gpuCanvas"></canvas>
+    <canvas id="overlayCanvas"></canvas>
+</div>
+
+<script type="module">
+    const logDiv = document.getElementById('debug');
+    const elStatus = document.getElementById('hudStatus');
+    const elCurrent = document.getElementById('hudCurrent');
+    const elBest = document.getElementById('hudBest');
+    const elFPS = document.getElementById('hudFPS');
+    const elStats = document.getElementById('stats');
+
+    function log(msg) { console.log(msg); logDiv.innerText = msg; }
+
+    // --- GLOBAL STATE ---
+    let device, context, overlayCtx;
+    let pipelines = {};
+    let buffers = {};
+    let bindGroups = {};
+    
+    let isPlaying = false;
+    let nParticles = 0;
+    let frameId = 0;
+    let lastTime = 0;
+    let isReadingScore = false;
+    let bestScore = Infinity;
+    
+    // Physics State
+    let probX = 0.5;
+    let globalCollisionCount = 0; 
+    
+    // Graph State
+    let scoreHistory = [];
+    let stagnationCount = 0;
+    
+    const FLOATS_PER_TREE = 8; 
+
+    // Define Poly in JS for Exact Bounds Calculation
+    const treePoly = [
+        {x:0.0, y:0.8}, {x:0.125, y:0.5}, {x:0.0625, y:0.5}, {x:0.2, y:0.25},
+        {x:0.1, y:0.25}, {x:0.35, y:0.0}, {x:0.075, y:0.0}, {x:0.075, y:-0.2},
+        {x:-0.075, y:-0.2}, {x:-0.075, y:0.0}, {x:-0.35, y:0.0}, {x:-0.1, y:0.25},
+        {x:-0.2, y:0.25}, {x:-0.0625, y:0.5}, {x:-0.125, y:0.5}, {x:0.0, y:0.8}
+    ];
+
+    // --- SHADERS ---
+
+    const COMMON_WGSL = `
+        struct Tree {
+            pos: vec2f,
+            vel: vec2f,
+            rot: f32,
+            ang_vel: f32,
+            col: f32,
+            _pad: f32,
+        };
+
+        struct Params {
+            zoom: f32,
+            compression: f32, 
+            probX: f32,       
+            time: f32,        
+            aspect: f32,      
+            _pad1: f32,
+            _pad2: f32,
+            _pad3: f32,
+        };
+        
+        var<private> tree_poly: array<vec2f, 16> = array<vec2f, 16>(
+            vec2f(0.0, 0.8), vec2f(0.125, 0.5), vec2f(0.0625, 0.5), vec2f(0.2, 0.25),
+            vec2f(0.1, 0.25), vec2f(0.35, 0.0), vec2f(0.075, 0.0), vec2f(0.075, -0.2),
+            vec2f(-0.075, -0.2), vec2f(-0.075, 0.0), vec2f(-0.35, 0.0), vec2f(-0.1, 0.25),
+            vec2f(-0.2, 0.25), vec2f(-0.0625, 0.5), vec2f(-0.125, 0.5), vec2f(0.0, 0.8)
+        );
+    `;
+
+    const COMPUTE_CODE = `
+        ${COMMON_WGSL}
+        @group(0) @binding(0) var<storage, read_write> trees: array<Tree>;
+        @group(0) @binding(1) var<uniform> params: Params;
+
+        fn hash(u: u32) -> f32 {
+            var x = u * 747796405u + 2891336453u;
+            x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+            return f32((x ^ (x >> 22u))) / 4294967295.0;
+        }
+
+        fn sdSegment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
+            let pa = p - a; let ba = b - a;
+            let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+            return length(pa - ba * h);
+        }
+
+        fn isInside(p: vec2f) -> bool {
+            var wn = 0;
+            for (var i = 0u; i < 15u; i++) {
+                let a = tree_poly[i]; let b = tree_poly[i+1];
+                if (a.y <= p.y) {
+                    if (b.y > p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) > 0.0) { wn++; }
+                } else {
+                    if (b.y <= p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) < 0.0) { wn--; }
+                }
+            }
+            return wn != 0;
+        }
+
+        @compute @workgroup_size(64)
+        fn main(@builtin(global_invocation_id) id: vec3u) {
+            let i = id.x;
+            if (i >= arrayLength(&trees)) { return; }
+            var t = trees[i];
+
+            // 1. STABILIZED GRAVITY
+            let rnd = hash(i + u32(params.time)); 
+            
+            // Limit the distance effect
+            // REDUCED SCALE BY 10 (was 0.05) to compress slower
+            let gravity_strength = clamp(params.compression * 0.005, 0.0, 0.2);
+            let x_pull = clamp(t.pos.x, -20.0, 20.0) * gravity_strength;
+            let y_pull = clamp(t.pos.y, -20.0, 20.0) * gravity_strength;
+
+            if (rnd < params.probX) {
+                t.vel.x -= x_pull;
+                t.vel.y += (hash(i*2u + u32(params.time)) - 0.5) * gravity_strength * 0.5;
+            } else {
+                t.vel.y -= y_pull;
+                t.vel.x += (hash(i*2u + u32(params.time)) - 0.5) * gravity_strength * 0.5;
+            }
+
+            // 2. Collision (Analytic)
+            let search_rad = 2.5; 
+            let count = arrayLength(&trees);
+            t.col = 0.0; 
+
+            if (length(t.pos) < 50.0) {
+                for (var j = 0u; j < count; j++) {
+                    if (i == j) { continue; }
+                    let other = trees[j];
+                    if (distance(t.pos, other.pos) > search_rad) { continue; }
+
+                    let c = cos(-other.rot); let s = sin(-other.rot);
+                    
+                    for (var v = 0u; v < 15u; v++) {
+                        let my_local_v = tree_poly[v];
+                        let mc = cos(t.rot); let ms = sin(t.rot);
+                        let my_world_v = t.pos + vec2f(my_local_v.x * mc - my_local_v.y * ms, my_local_v.x * ms + my_local_v.y * mc);
+                        let diff = my_world_v - other.pos;
+                        let other_local_p = vec2f(diff.x * c - diff.y * s, diff.x * s + diff.y * c);
+                        
+                        var dist = 1000.0;
+                        for (var k = 0u; k < 15u; k++) { dist = min(dist, sdSegment(other_local_p, tree_poly[k], tree_poly[k+1])); }
+                        if (isInside(other_local_p)) { dist = -dist; }
+                        
+                        if (dist < 0.02) {
+                            t.col = 1.0;
+                            let contact_vec = normalize(my_world_v - other.pos);
+                            
+                            // Force Clamp
+                            let force_mag = (0.02 - dist) * 30.0;
+                            let safe_force = min(force_mag, 1.0); 
+                            
+                            t.vel += contact_vec * safe_force;
+                            
+                            // Torque Damping
+                            let arm = my_world_v - t.pos;
+                            let torque = (arm.x * contact_vec.y - arm.y * contact_vec.x);
+                            t.ang_vel += clamp(torque * safe_force * 3.0, -1.0, 1.0);
+                        }
+                    }
+                }
+            }
+
+            // 3. Integration
+            let dt = 0.016;
+            t.vel *= 0.90; 
+            if (length(t.vel) > 2.0) { t.vel = normalize(t.vel) * 2.0; }
+            t.pos += t.vel * dt;
+            
+            t.ang_vel *= 0.80; 
+            t.ang_vel = clamp(t.ang_vel, -5.0, 5.0); 
+            t.rot += t.ang_vel * dt;
+
+            if (abs(t.pos.x) > 100.0 || abs(t.pos.y) > 100.0) { t.pos = vec2f(0.0); t.vel = vec2f(0.0); }
+
+            trees[i] = t;
+        }
+    `;
+
+    const VERTEX_CODE = `
+        ${COMMON_WGSL}
+        @group(0) @binding(0) var<storage, read> trees: array<Tree>;
+        @group(0) @binding(1) var<uniform> params: Params;
+        struct VertexOut { @builtin(position) pos: vec4f, @location(0) color: vec4f };
+
+        @vertex fn vert(@builtin(vertex_index) vIdx: u32, @builtin(instance_index) iIdx: u32) -> VertexOut {
+            let t = trees[iIdx];
+            let local = tree_poly[vIdx % 16];
+            let c = cos(t.rot); let s = sin(t.rot);
+            let world = t.pos + vec2f(local.x * c - local.y * s, local.x * s + local.y * c);
+            
+            let aspect_vec = vec2f(1.0 / params.aspect, 1.0);
+            
+            var out: VertexOut;
+            out.pos = vec4f(world * params.zoom * 0.1 * aspect_vec, 0.0, 1.0);
+            if (t.col > 0.5) { out.color = vec4f(1.0, 0.2, 0.2, 1.0); } 
+            else { let speed = length(t.vel); out.color = vec4f(0.2, 0.8 + speed, 0.3, 1.0); }
+            return out;
+        }
+        @fragment fn frag(@location(0) color: vec4f) -> @location(0) vec4f { return color; }
+    `;
+
+    async function init() {
+        if (!navigator.gpu) return log("❌ WebGPU not supported.");
+        const adapter = await navigator.gpu.requestAdapter();
+        device = await adapter.requestDevice();
+        
+        const canvas = document.getElementById('gpuCanvas');
+        const overlay = document.getElementById('overlayCanvas');
+        
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        canvas.width = w; canvas.height = h;
+        overlay.width = w; overlay.height = h;
+        
+        context = canvas.getContext('webgpu');
+        overlayCtx = overlay.getContext('2d');
+        
+        context.configure({ device, format: navigator.gpu.getPreferredCanvasFormat(), alphaMode: 'premultiplied' });
+
+        buffers.params = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+        const createModule = async (code, label) => {
+            const mod = device.createShaderModule({ code });
+            const info = await mod.getCompilationInfo();
+            if (info.messages.some(m => m.type === 'error')) {
+                log(`❌ ${label} Error:\n` + info.messages.map(m => m.message).join('\n'));
+                throw new Error("Shader Error");
+            }
+            return mod;
+        };
+
+        const compModule = await createModule(COMPUTE_CODE, "Compute");
+        const vertModule = await createModule(VERTEX_CODE, "Vertex");
+
+        pipelines.compute = device.createComputePipeline({
+            layout: 'auto', compute: { module: compModule, entryPoint: 'main' }
+        });
+
+        pipelines.render = device.createRenderPipeline({
+            layout: 'auto',
+            vertex: { module: vertModule, entryPoint: 'vert' },
+            fragment: { module: vertModule, entryPoint: 'frag', targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }] },
+            primitive: { topology: 'line-strip' }
+        });
+
+        log("✅ System Ready");
+        spawn(10); // Start with 10 trees
+        requestAnimationFrame(loop);
+    }
+
+    function spawn(count) {
+        // RESET STATE
+        isPlaying = false; // Stop physics
+        nParticles = count;
+        bestScore = Infinity;
+        frameId = 0;
+        globalCollisionCount = 0;
+        probX = 0.5;
+        scoreHistory = [];
+        stagnationCount = 0;
+
+        // Reset UI
+        elBest.innerText = "--";
+        elStatus.innerText = "READY";
+        elStatus.className = "hud-val";
+        elCurrent.innerText = "0.00";
+        elCurrent.className = "hud-val";
+
+        const data = new Float32Array(count * FLOATS_PER_TREE); 
+        const spread = Math.sqrt(count) * 2.0; 
+        
+        for (let i = 0; i < count; i++) {
+            const idx = i * FLOATS_PER_TREE;
+            data[idx+0] = (Math.random()-0.5) * spread; 
+            data[idx+1] = (Math.random()-0.5) * spread;
+            data[idx+4] = Math.random() * 6.28; 
+        }
+
+        if (buffers.work) buffers.work.destroy();
+        buffers.work = device.createBuffer({
+            size: data.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: true
+        });
+        new Float32Array(buffers.work.getMappedRange()).set(data);
+        buffers.work.unmap();
+
+        if (buffers.read) buffers.read.destroy();
+        buffers.read = device.createBuffer({
+            size: data.byteLength, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        bindGroups.compute = device.createBindGroup({
+            layout: pipelines.compute.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: buffers.work } },
+                { binding: 1, resource: { buffer: buffers.params } }
+            ]
+        });
+
+        bindGroups.render = device.createBindGroup({
+            layout: pipelines.render.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: buffers.work } },
+                { binding: 1, resource: { buffer: buffers.params } }
+            ]
+        });
+        
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        
+        // Force one render update to show new positions
+        render();
+    }
+
+    async function updateScore() {
+        if (isReadingScore || !buffers.work) return;
+        isReadingScore = true;
+        const enc = device.createCommandEncoder();
+        enc.copyBufferToBuffer(buffers.work, 0, buffers.read, 0, buffers.work.size);
+        device.queue.submit([enc.finish()]);
+        
+        await buffers.read.mapAsync(GPUMapMode.READ);
+        const data = new Float32Array(buffers.read.getMappedRange());
+        
+        let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+        let collisionCount = 0;
+
+        // EXACT BOUNDS CALCULATION
+        for(let i=0; i<nParticles; i++) {
+            let idx = i * FLOATS_PER_TREE;
+            let px = data[idx]; 
+            let py = data[idx+1];
+            let rot = data[idx+4];
+            let col = data[idx+6];
+            
+            if (col > 0.5) collisionCount++;
+
+            // Calculate extents of this tree
+            let cosR = Math.cos(rot);
+            let sinR = Math.sin(rot);
+            
+            for(let v of treePoly) {
+                // Rotate
+                let rx = v.x * cosR - v.y * sinR;
+                let ry = v.x * sinR + v.y * cosR;
+                // Translate
+                let wx = px + rx;
+                let wy = py + ry;
+                
+                if (wx < minX) minX = wx;
+                if (wx > maxX) maxX = wx;
+                if (wy < minY) minY = wy;
+                if (wy > maxY) maxY = wy;
+            }
+        }
+        
+        buffers.read.unmap();
+        isReadingScore = false;
+        
+        globalCollisionCount = collisionCount;
+
+        if (minX !== Infinity) {
+            let w = maxX - minX; 
+            let h = maxY - minY;
+            let side = Math.max(w, h);
+            
+            probX = w / (w + h);
+            elStats.innerText = `Prob X: ${probX.toFixed(2)} | Prob Y: ${(1-probX).toFixed(2)}`;
+
+            let score = (side * side) / nParticles;
+            elCurrent.innerText = score.toFixed(4);
+            
+            if (collisionCount > 0) {
+                elStatus.innerText = "RELAXING";
+                elStatus.className = "hud-val val-relax";
+                elCurrent.className = "hud-val val-invalid";
+            } else {
+                elStatus.innerText = "SQUEEZING";
+                elStatus.className = "hud-val val-valid";
+                elCurrent.className = "hud-val val-valid";
+                
+                // Track History
+                scoreHistory.push(score);
+                if(scoreHistory.length > 50) scoreHistory.shift();
+                
+                if (score < bestScore) {
+                    bestScore = score;
+                    elBest.innerText = score.toFixed(4);
+                    stagnationCount = 0;
+                } else {
+                    stagnationCount++;
+                }
+            }
+
+            drawOverlay(minX, minY, w, h, side);
+        }
+    }
+
+    function drawOverlay(x, y, w, h, side) {
+        const ctx = overlayCtx;
+        const cw = ctx.canvas.width;
+        const ch = ctx.canvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+
+        const zoom = parseFloat(document.getElementById('rngZoom').value);
+        const aspect = cw / ch;
+        const worldScale = zoom * 0.1;
+
+        function toScreen(wx, wy) {
+            let clipX = wx * worldScale / aspect;
+            let clipY = wy * worldScale;
+            let sx = (clipX + 1) * 0.5 * cw;
+            let sy = (1 - (clipY + 1) * 0.5) * ch;
+            return {x: sx, y: sy};
+        }
+
+        // Draw Bounding Rect (Cyan)
+        ctx.strokeStyle = "#0ff";
+        ctx.lineWidth = 2;
+        const p1 = toScreen(x, y);
+        const p2 = toScreen(x + w, y + h);
+        
+        // Calculate Screen Bounds for Arrows
+        const minSx = Math.min(p1.x, p2.x);
+        const maxSx = Math.max(p1.x, p2.x);
+        const minSy = Math.min(p1.y, p2.y);
+        const maxSy = Math.max(p1.y, p2.y);
+        const midSx = (minSx + maxSx) / 2;
+        const midSy = (minSy + maxSy) / 2;
+
+        ctx.strokeRect(p1.x, p2.y, p2.x - p1.x, p1.y - p2.y);
+
+        // Draw Scoring Square (Yellow)
+        ctx.strokeStyle = "#f6e05e";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        let cx = x + w/2;
+        let cy = y + h/2;
+        let sx = cx - side/2;
+        let sy = cy - side/2;
+        const sp1 = toScreen(sx, sy);
+        const sp2 = toScreen(sx + side, sy + side);
+        ctx.strokeRect(sp1.x, sp2.y, sp2.x - sp1.x, sp1.y - sp2.y);
+        ctx.setLineDash([]);
+
+        // --- DRAW COMPRESSION ARROWS ---
+        ctx.fillStyle = "rgba(255, 80, 80, 0.9)";
+        ctx.strokeStyle = "rgba(255, 80, 80, 0.9)";
+        ctx.lineWidth = 4;
+        
+        const arrowLen = 40;
+        const pad = 15;
+
+        const drawArrow = (x, y, dx, dy) => {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + dx, y + dy);
+            ctx.stroke();
+            // Arrowhead
+            const ang = Math.atan2(dy, dx);
+            ctx.beginPath();
+            ctx.moveTo(x + dx, y + dy);
+            ctx.lineTo(x + dx - 15*Math.cos(ang-0.5), y + dy - 15*Math.sin(ang-0.5));
+            ctx.lineTo(x + dx - 15*Math.cos(ang+0.5), y + dy - 15*Math.sin(ang+0.5));
+            ctx.closePath();
+            ctx.fill();
+        };
+
+        if (probX > 0.55) {
+            // Squeezing X (Width is too big) -> Horizontal Arrows In
+            drawArrow(minSx - pad - arrowLen, midSy, arrowLen, 0);
+            drawArrow(maxSx + pad + arrowLen, midSy, -arrowLen, 0);
+        } else if (probX < 0.45) {
+            // Squeezing Y (Height is too big) -> Vertical Arrows In
+            drawArrow(midSx, minSy - pad - arrowLen, 0, arrowLen);
+            drawArrow(midSx, maxSy + pad + arrowLen, 0, -arrowLen);
+        }
+        
+        // --- DRAW GRAPH ---
+        drawGraph(ctx, cw, ch);
+    }
+    
+    function drawGraph(ctx, w, h) {
+        if (scoreHistory.length < 2) return;
+        
+        const gw = 180; // Graph Width
+        const gh = 50;  // Graph Height
+        const gx = w - gw - 20;
+        const gy = 70; // Below top bar
+        
+        // Background
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.fillRect(gx, gy, gw, gh);
+        ctx.strokeStyle = "#444";
+        ctx.setLineDash([]);
+        ctx.strokeRect(gx, gy, gw, gh);
+        
+        let minS = Math.min(...scoreHistory);
+        let maxS = Math.max(...scoreHistory);
+        let range = maxS - minS;
+        if (range < 0.0001) range = 1.0; 
+        
+        // Color Red if Stagnant
+        const isStagnant = stagnationCount > 5;
+        ctx.strokeStyle = isStagnant ? "#ff4444" : "#4fd1c5";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        let localMin = Infinity;
+        let localMinX, localMinY;
+        
+        for (let i = 0; i < scoreHistory.length; i++) {
+            let val = scoreHistory[i];
+            let norm = (val - minS) / range;
+            let x = gx + (i / (scoreHistory.length - 1)) * gw;
+            let y = gy + gh - (norm * gh); // Bottom is minS
+            
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            
+            if (val <= localMin) {
+                localMin = val;
+                localMinX = x;
+                localMinY = y;
+            }
+        }
+        ctx.stroke();
+        
+        // Highlight Min
+        if (localMin !== Infinity) {
+            ctx.fillStyle = "#f6e05e";
+            ctx.beginPath();
+            ctx.arc(localMinX, localMinY, 3, 0, Math.PI*2);
+            ctx.fill();
+        }
+        
+        if (isStagnant) {
+            ctx.fillStyle = "#ff4444";
+            ctx.font = "10px sans-serif";
+            ctx.fillText("STAGNANT", gx + 5, gy + 15);
+        }
+    }
+
+    function updateParams() {
+        const zoom = parseFloat(document.getElementById('rngZoom').value);
+        let comp = parseFloat(document.getElementById('rngComp').value);
+        const aspect = window.innerWidth/window.innerHeight;
+        
+        // RATCHET LOGIC
+        if (globalCollisionCount > 0) {
+            comp = 0.0; // Stop squeezing if colliding
+        }
+        
+        document.getElementById('valZoom').innerText = zoom.toFixed(1);
+        document.getElementById('valComp').innerText = comp.toFixed(1); 
+        
+        const data = new Float32Array([zoom, comp, probX, frameId, aspect, 0, 0, 0]);
+        device.queue.writeBuffer(buffers.params, 0, data);
+    }
+
+    function step() {
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(pipelines.compute);
+        pass.setBindGroup(0, bindGroups.compute);
+        pass.dispatchWorkgroups(Math.ceil(nParticles/64));
+        pass.end();
+        device.queue.submit([enc.finish()]);
+    }
+
+    function render() {
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginRenderPass({
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                clearValue: { r: 0.05, g: 0.05, b: 0.05, a: 1.0 }, 
+                loadOp: 'clear', storeOp: 'store'
+            }]
+        });
+        pass.setPipeline(pipelines.render);
+        pass.setBindGroup(0, bindGroups.render);
+        pass.draw(16, nParticles); 
+        pass.end();
+        device.queue.submit([enc.finish()]);
+    }
+
+    function loop(time) {
+        updateParams();
+        if (isPlaying) { 
+            step(); 
+            if (frameId % 10 === 0) updateScore(); 
+        }
+        render();
+        
+        const dt = time - lastTime;
+        if (dt > 500) {
+            const fps = (1000 / (dt / ((dt/16)||1))).toFixed(0);
+            elFPS.innerText = fps;
+            lastTime = time;
+        }
+        frameId++;
+        requestAnimationFrame(loop);
+    }
+
+    document.getElementById('menu-toggle').onclick = () => { document.getElementById('ui-container').classList.toggle('hidden'); };
+    document.getElementById('btnRestart').onclick = () => spawn(parseInt(document.getElementById('nInput').value));
+    document.getElementById('btnPlay').onclick = () => isPlaying = true;
+    document.getElementById('btnPause').onclick = () => isPlaying = false;
+    document.getElementById('btnStep').onclick = () => { step(); render(); };
+    window.onresize = () => { 
+        const w = window.innerWidth; const h = window.innerHeight;
+        document.getElementById('gpuCanvas').width = w; 
+        document.getElementById('gpuCanvas').height = h;
+        document.getElementById('overlayCanvas').width = w;
+        document.getElementById('overlayCanvas').height = h;
+        render(); 
+    };
+
+    init().catch(e => log("❌ " + e.message));
+</script>
+</body>
+</html>

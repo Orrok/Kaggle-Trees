@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Advanced WebGPU Tree Packer</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import { TreePackerApp } from './js/TreePackerApp.js';
+
+        // Initialize the tree packer when page loads
+        async function main() {
+            try {
+                console.log('Initializing modular Tree Packer application...');
+                const app = new TreePackerApp();
+                await app.init();
+                console.log('Modular Tree Packer initialized successfully');
+
+                // Make app available globally for UI controls
+                window.treePackerApp = app;
+
+                // Setup control buttons
+                setupControls(app);
+            } catch (error) {
+                console.error('Failed to initialize Tree Packer:', error);
+                // Fallback: show error message
+                const canvas = document.getElementById('gpuCanvas');
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = 800;
+                    canvas.height = 600;
+                    ctx.fillStyle = '#2a2a2a';
+                    ctx.fillRect(0, 0, 800, 600);
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.font = 'bold 18px Arial';
+                    ctx.fillText('Modular Tree Packer Failed to Load', 50, 50);
+                    ctx.fillStyle = 'white';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('Error: ' + error.message, 50, 90);
+                }
+            }
+        }
+
+        // Setup control button event listeners
+        function setupControls(app) {
+            const playBtn = document.getElementById('play-btn');
+            const pauseBtn = document.getElementById('pause-btn');
+            const stepBtn = document.getElementById('step-btn');
+
+            // Play button
+            playBtn.addEventListener('click', () => {
+                app.start();
+                playBtn.classList.add('active');
+                pauseBtn.classList.remove('active');
+            });
+
+            // Pause button
+            pauseBtn.addEventListener('click', () => {
+                app.stop();
+                playBtn.classList.remove('active');
+                pauseBtn.classList.add('active');
+            });
+
+            // Step button (single frame)
+            stepBtn.addEventListener('click', () => {
+                app.step();
+            });
+        }
+
+        // Start when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', main);
+        } else {
+            main();
+        }
+    </script>
+</head>
+<body>
+    <div id="layer-container">
+        <canvas id="gpuCanvas"></canvas>
+        <canvas id="overlayCanvas"></canvas>
+    </div>
+
+    <!-- HUD -->
+    <div id="top-bar">
+        <div class="hud-item">
+            <span class="hud-label">FPS</span>
+            <span class="hud-val" id="hudFPS">0</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">Mode</span>
+            <span class="hud-val" id="hudStatus">--</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">Score (Area/N)</span>
+            <span class="hud-val" id="hudCurrent">0.00</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">Best</span>
+            <span class="hud-val val-best" id="hudBest">--</span>
+        </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div id="controls-panel">
+        <div id="controls-header">
+            <span class="control-title">Tree Packer Controls</span>
+            <button id="minimize-btn">−</button>
+        </div>
+        <div id="controls-content">
+            <div class="control-group">
+                <span class="control-label">Tree Count</span>
+                <input type="range" class="control-slider" id="tree-slider" min="1" max="200" step="1" value="10">
+                <span class="control-value" id="tree-value">10</span>
+            </div>
+
+            <div class="control-group">
+                <span class="control-label">Zoom</span>
+                <input type="range" class="control-slider" id="zoom-slider" min="0.1" max="10.0" step="0.1" value="2.0">
+                <span class="control-value" id="zoom-value">2.0</span>
+            </div>
+
+            <div class="control-group">
+                <span class="control-label">Compression</span>
+                <input type="range" class="control-slider" id="compress-slider" min="0" max="5.0" step="0.1" value="1.0">
+                <span class="control-value" id="compress-value">1.00</span>
+            </div>
+
+            <div class="control-group">
+                <span class="control-label">Relaxation Rate</span>
+                <input type="range" class="control-slider" id="relax-slider" min="0.1" max="2.0" step="0.1" value="1.0">
+                <span class="control-value" id="relax-value">1.00</span>
+            </div>
+
+            <div class="control-group">
+                <span class="control-label">Render Every N Frames</span>
+                <input type="range" class="control-slider" id="render-frequency-slider" min="1" max="30" step="1" value="1">
+                <span class="control-value" id="render-frequency-value">1</span>
+            </div>
+
+            <div class="control-group">
+                <button class="control-btn" id="play-btn">▶ Play</button>
+                <button class="control-btn" id="pause-btn">⏸ Pause</button>
+                <button class="control-btn" id="step-btn">⏯ Step</button>
+            </div>
+
+            <div class="control-group">
+                <button class="control-btn active" id="auto-pack-btn">Auto Pack</button>
+                <button class="control-btn" id="reset-btn">Reset</button>
+                <button class="control-btn" id="debug-btn">Debug</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEBUG PANEL -->
+    <div id="debug-panel">
+        <button id="close-debug">×</button>
+        <div><strong>Debug Log</strong></div>
+        <div id="debug-log"></div>
+    </div>
+
+    <!-- PERFORMANCE -->
+    <div id="perf-indicator">
+        <div>GPU Load</div>
+        <div id="perf-bar"><div id="perf-fill"></div></div>
+    </div>
+
+
+            setupUI() {
+                this.treeSlider = document.getElementById('tree-slider');
+                this.treeValue = document.getElementById('tree-value');
+                this.compressSlider = document.getElementById('compress-slider');
+                this.compressValue = document.getElementById('compress-value');
+                this.relaxSlider = document.getElementById('relax-slider');
+                this.relaxValue = document.getElementById('relax-value');
+                this.autoPackBtn = document.getElementById('auto-pack-btn');
+                this.resetBtn = document.getElementById('reset-btn');
+                this.debugBtn = document.getElementById('debug-btn');
+                this.debugPanel = document.getElementById('debug-panel');
+                this.debugLog = document.getElementById('debug-log');
+                this.closeDebug = document.getElementById('close-debug');
+
+                // Stats
+                this.treeCountEl = document.getElementById('tree-count');
+                this.packRatioEl = document.getElementById('pack-ratio');
+                this.fpsEl = document.getElementById('fps');
+            }
+
+            setupEventListeners() {
+                // Sliders
+                this.treeSlider.addEventListener('input', (e) => {
+                    this.params.treeCount = parseInt(e.target.value);
+                    this.treeValue.textContent = this.params.treeCount;
+                    this.needsReset = true;
+                });
+
+                this.compressSlider.addEventListener('input', (e) => {
+                    this.params.compressionForce = parseFloat(e.target.value);
+                    this.compressValue.textContent = this.params.compressionForce.toFixed(2);
+                });
+
+                this.relaxSlider.addEventListener('input', (e) => {
+                    this.params.relaxationRate = parseFloat(e.target.value);
+                    this.relaxValue.textContent = this.params.relaxationRate.toFixed(2);
+                });
+
+                // Buttons
+                this.autoPackBtn.addEventListener('click', () => {
+                    this.params.autoPack = !this.params.autoPack;
+                    this.autoPackBtn.classList.toggle('active', this.params.autoPack);
+                });
+
+                this.resetBtn.addEventListener('click', () => {
+                    this.resetSimulation();
+                });
+
+                this.debugBtn.addEventListener('click', () => {
+                    this.debugPanel.style.display = 'block';
+                });
+
+                this.closeDebug.addEventListener('click', () => {
+                    this.debugPanel.style.display = 'none';
+                });
+
+                // Window resize
+                window.addEventListener('resize', () => {
+                    this.resizeCanvas();
+                });
+            }
+
+            async init() {
+                // Check WebGPU support
+                if (!navigator.gpu) {
+                    throw new Error('WebGPU not supported');
+                }
+
+                // Check secure context
+                if (!window.isSecureContext) {
+                    throw new Error('WebGPU requires a secure context (HTTPS or localhost)');
+                }
+
+                // Check WebGPU permissions if available
+                if ('permissions' in navigator) {
+                    try {
+                        const permission = await navigator.permissions.query({name: 'gpu'});
+                        console.log('WebGPU permission status:', permission.state);
+                        if (permission.state === 'denied') {
+                            throw new Error('WebGPU permission denied. Please allow WebGPU access in your browser settings.');
+                        }
+                    } catch (permError) {
+                        console.log('Permission check failed or not supported:', permError);
+                    }
+                }
+
+                // Request adapter and device
+                console.log('Requesting WebGPU adapter...');
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    throw new Error('No WebGPU adapter available. Your browser may support WebGPU but no compatible graphics adapter was found. Try updating your graphics drivers.');
+                }
+                console.log('WebGPU adapter found, requesting device...');
+                this.device = await adapter.requestDevice();
+                console.log('WebGPU device created successfully');
+
+                // Setup canvas context
+                this.context = this.canvas.getContext('webgpu');
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                this.context.configure({
+                    device: this.device,
+                    format: format,
+                    alphaMode: 'opaque'
+                });
+
+                // Initialize buffers and pipelines
+                await this.initBuffers();
+                await this.initPipelines();
+
+                // Resize canvas initially
+                this.resizeCanvas();
+
+                this.log('WebGPU initialized successfully');
+            }
+
+            async initBuffers() {
+        // Tree data buffer (position, rotation, velocity, angular_velocity, radius, padding)
+        const treeDataSize = this.params.treeCount * 10 * 4; // 10 floats per tree (2+1+2+1+1+3)
+                this.treeBuffer = this.device.createBuffer({
+                    size: treeDataSize,
+                    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+                });
+
+        // Read buffer for CPU feedback loop
+        this.readBuffer = this.device.createBuffer({
+            size: treeDataSize,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
+        // Update buffer resize method reference
+        this.resizeTreeBuffers = (newTreeCount) => {
+            const currentSize = this.treeBuffer?.size || 0;
+            const newSize = newTreeCount * 10 * 4;
+            if (currentSize !== newSize) {
+                this.createTreeBuffer(newTreeCount);
+                this.createReadBuffer(newTreeCount);
+                return true;
+            }
+            return false;
+        };
+
+                // Uniform buffer for simulation parameters
+                this.uniformBuffer = this.device.createBuffer({
+                    size: 16 * 4, // 16 floats
+                    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+                });
+
+                // Vertex buffer for tree geometry
+                this.vertexBuffer = this.device.createBuffer({
+                    size: this.treeVertices.length * 4,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true
+                });
+                new Float32Array(this.vertexBuffer.getMappedRange()).set(this.treeVertices);
+                this.vertexBuffer.unmap();
+
+                // Index buffer
+                this.indexBuffer = this.device.createBuffer({
+                    size: this.treeIndices.length * 4,
+                    usage: GPUBufferUsage.INDEX,
+                    mappedAtCreation: true
+                });
+                new Uint32Array(this.indexBuffer.getMappedRange()).set(this.treeIndices);
+                this.indexBuffer.unmap();
+
+                // Geometry buffer for collision detection (shared with GPU)
+                this.geometryBuffer = this.device.createBuffer({
+                    size: this.treePoly.length * 4,
+                    usage: GPUBufferUsage.STORAGE,
+                    mappedAtCreation: true
+                });
+                new Float32Array(this.geometryBuffer.getMappedRange()).set(this.treePoly);
+                this.geometryBuffer.unmap();
+
+                this.log('Buffers initialized');
+            }
+
+            async initPipelines() {
+                try {
+                // Create explicit bind group layout
+                const bindGroupLayout = this.device.createBindGroupLayout({
+                    entries: [
+                        {
+                            binding: 0,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'storage' }
+                        },
+                        {
+                            binding: 1,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'uniform' }
+                        },
+                        {
+                            binding: 2,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'storage' }
+                        }
+                    ]
+                });
+
+                // Create separate layouts for compute and render pipelines
+                const computeBindGroupLayout = this.device.createBindGroupLayout({
+                    entries: [
+                        {
+                            binding: 0,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'storage' }
+                        },
+                        {
+                            binding: 1,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'uniform' }
+                        },
+                        {
+                            binding: 2,
+                            visibility: GPUShaderStage.COMPUTE,
+                            buffer: { type: 'storage' }
+                        }
+                    ]
+                });
+
+                const renderBindGroupLayout = this.device.createBindGroupLayout({
+                    entries: [
+                        {
+                            binding: 0,
+                            visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                            buffer: { type: 'read-only-storage' }
+                        },
+                        {
+                            binding: 1,
+                            visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                            buffer: { type: 'uniform' }
+                        }
+                    ]
+                });
+
+                // Compute pipeline for physics simulation
+                const computeShaderCode = `
+                    struct Tree {
+                        position: vec2f,
+                        rotation: f32,
+                        velocity: vec2f,
+                        angular_velocity: f32,
+                        radius: f32,
+                        padding: vec3f
+                    };
+
+                    struct Params {
+                        tree_count: u32,
+                        delta_time: f32,
+                        compression_force: f32,
+                        relaxation_rate: f32,
+                        aspect: f32,
+                        center_x: f32,
+                        center_y: f32,
+                        frame_count: u32,
+                        prob_x: f32,
+                        prob_y: f32
+                    };
+
+                    @group(0) @binding(0) var<storage, read_write> trees: array<Tree>;
+                    @group(0) @binding(1) var<uniform> params: Params;
+                    @group(0) @binding(2) var<storage, read> tree_geometry: array<vec2f>;
+
+                    fn distance_squared(a: vec2f, b: vec2f) -> f32 {
+                        let diff = a - b;
+                        return dot(diff, diff);
+                    }
+
+                    fn distance(a: vec2f, b: vec2f) -> f32 {
+                        return sqrt(distance_squared(a, b));
+                    }
+
+                    @compute @workgroup_size(64)
+                    fn main(@builtin(global_invocation_id) global_id: vec3u) {
+                        let idx = global_id.x;
+                        if (idx >= params.tree_count) {
+                            return;
+                        }
+
+                        var tree = trees[idx];
+                        var force = vec2f(0.0, 0.0);
+                        var torque = 0.0;
+
+                        // Check collisions with other trees
+                        for (var j = 0u; j < params.tree_count; j = j + 1u) {
+                            if (idx == j) {
+                                continue;
+                            }
+
+                            let other = trees[j];
+                            let dist = distance(tree.position, other.position);
+                            let min_dist = tree.radius + other.radius;
+
+                            if (dist < min_dist && dist > 0.0) {
+                                // Repulsion force when trees overlap
+                                let overlap = min_dist - dist;
+                                let direction = normalize(tree.position - other.position);
+                                let repulsion = direction * overlap * params.relaxation_rate * 10.0;
+                                force += repulsion;
+
+                                // Add some rotational force based on collision
+                                let tangent = vec2f(-direction.y, direction.x);
+                                torque += dot(repulsion, tangent) * 0.1;
+                            } else if (params.compression_force > 0.0) {
+                                // Attraction force to pack trees together
+                                let direction = normalize(other.position - tree.position);
+                                let attraction_strength = params.compression_force * 0.1;
+                                let attraction = direction * attraction_strength * params.prob_x * params.prob_y;
+                                force += attraction;
+                            }
+                        }
+
+                        // Apply forces to velocity
+                        tree.velocity += force * params.delta_time;
+
+                        // Apply torque
+                        tree.angular_velocity += torque * params.delta_time;
+
+                        // Dampen velocity (friction)
+                        tree.velocity *= 0.95;
+                        tree.angular_velocity *= 0.95;
+
+                        // Update position
+                        tree.position += tree.velocity * params.delta_time;
+                        tree.rotation += tree.angular_velocity * params.delta_time;
+
+                        // Keep trees in bounds with soft boundaries
+                        let boundary_force = 2.0;
+                        if (tree.position.x < -1.8) {
+                            force.x += boundary_force * (1.8 + tree.position.x);
+                        } else if (tree.position.x > 1.8) {
+                            force.x -= boundary_force * (tree.position.x - 1.8);
+                        }
+
+                        if (tree.position.y < -1.8) {
+                            force.y += boundary_force * (1.8 + tree.position.y);
+                        } else if (tree.position.y > 1.8) {
+                            force.y -= boundary_force * (tree.position.y - 1.8);
+                        }
+
+                        // Hard bounds as backup
+                        tree.position = clamp(tree.position, vec2f(-2.0), vec2f(2.0));
+
+                        trees[idx] = tree;
+                    }
+                `;
+
+                console.log('Creating compute shader module...');
+                const computeShader = this.device.createShaderModule({
+                    code: computeShaderCode
+                });
+                console.log('Compute shader created successfully');
+
+                // Create pipeline layouts
+                const computePipelineLayout = this.device.createPipelineLayout({
+                    bindGroupLayouts: [computeBindGroupLayout]
+                });
+
+                const renderPipelineLayout = this.device.createPipelineLayout({
+                    bindGroupLayouts: [renderBindGroupLayout]
+                });
+
+                console.log('Creating compute pipeline...');
+                this.computePipeline = this.device.createComputePipeline({
+                    layout: computePipelineLayout,
+                    compute: {
+                        module: computeShader,
+                        entryPoint: 'main'
+                    }
+                });
+                console.log('Compute pipeline created successfully');
+
+                // Render pipeline for instanced drawing
+                const renderShaderCode = `
+                    struct Tree {
+                        position: vec2f,
+                        rotation: f32,
+                        velocity: vec2f,
+                        angular_velocity: f32,
+                        radius: f32,
+                        padding: vec3f
+                    };
+
+                    struct Params {
+                        tree_count: u32,
+                        delta_time: f32,
+                        compression_force: f32,
+                        relaxation_rate: f32,
+                        aspect: f32,
+                        center_x: f32,
+                        center_y: f32,
+                        frame_count: u32,
+                        prob_x: f32,
+                        prob_y: f32
+                    };
+
+                    @group(0) @binding(0) var<storage, read> trees: array<Tree>;
+                    @group(0) @binding(1) var<uniform> params: Params;
+
+                    struct VertexOut {
+                        @builtin(position) position: vec4f,
+                        @location(0) color: vec3f,
+                    };
+
+                    @vertex
+                    fn vertex_main(
+                        @location(0) position: vec2f,
+                        @builtin(instance_index) instance_idx: u32
+                    ) -> VertexOut {
+                        var out: VertexOut;
+
+                        if (instance_idx >= params.tree_count) {
+                            out.position = vec4f(0.0, 0.0, 0.0, 1.0);
+                            out.color = vec3f(0.0);
+                            return out;
+                        }
+
+                        let tree = trees[instance_idx];
+
+                        // Simple positioning without rotation for now
+                        let world_pos = position * 0.1 + tree.position;
+                        var final_pos = world_pos * 0.5; // Convert to NDC
+                        final_pos.x /= params.aspect;
+
+                        out.position = vec4f(final_pos, 0.0, 1.0);
+                        out.color = vec3f(0.2, 0.8, 0.3); // Green trees
+
+                        return out;
+                    }
+
+                    @fragment
+                    fn fragment_main(in: VertexOut) -> @location(0) vec4f {
+                        return vec4f(in.color, 1.0);
+                    }
+                `;
+
+                const renderShader = this.device.createShaderModule({
+                    code: renderShaderCode
+                });
+
+                console.log('Creating render pipeline...');
+                this.renderPipeline = this.device.createRenderPipeline({
+                    layout: renderPipelineLayout,
+                    vertex: {
+                        module: renderShader,
+                        entryPoint: 'vertex_main',
+                        buffers: [{
+                            arrayStride: 8, // 2 floats per vertex
+                            attributes: [{
+                                shaderLocation: 0,
+                                offset: 0,
+                                format: 'float32x2'
+                            }]
+                        }]
+                    },
+                    fragment: {
+                        module: renderShader,
+                        entryPoint: 'fragment_main',
+                        targets: [{
+                            format: navigator.gpu.getPreferredCanvasFormat()
+                        }]
+                    },
+                    primitive: {
+                        topology: 'triangle-list'
+                    }
+                });
+                console.log('Render pipeline created successfully');
+
+                // Create separate bind groups for compute and render
+                this.computeBindGroup = this.device.createBindGroup({
+                    layout: computeBindGroupLayout,
+                    entries: [
+                        { binding: 0, resource: { buffer: this.treeBuffer } },
+                        { binding: 1, resource: { buffer: this.uniformBuffer } },
+                        { binding: 2, resource: { buffer: this.geometryBuffer } }
+                    ]
+                });
+
+                this.renderBindGroup = this.device.createBindGroup({
+                    layout: renderBindGroupLayout,
+                    entries: [
+                        { binding: 0, resource: { buffer: this.treeBuffer } },
+                        { binding: 1, resource: { buffer: this.uniformBuffer } }
+                    ]
+                });
+
+                this.log('Pipelines initialized');
+                } catch (error) {
+                    console.error('Pipeline creation failed:', error);
+                    throw error;
+                }
+            }
+
+            resetSimulation() {
+                // Initialize trees in a circle
+                const treeData = new Float32Array(this.params.treeCount * 10);
+                const radius = 1.0;
+
+        for (let i = 0; i < this.params.treeCount; i++) {
+            const angle = (i / this.params.treeCount) * Math.PI * 2;
+            const x = Math.cos(angle) * radius * (0.5 + Math.random() * 0.5);
+            const y = Math.sin(angle) * radius * (0.5 + Math.random() * 0.5);
+
+            const offset = i * 10;
+            treeData[offset + 0] = x; // position.x
+            treeData[offset + 1] = y; // position.y
+            treeData[offset + 2] = Math.random() * Math.PI * 2; // rotation
+            treeData[offset + 3] = (Math.random() - 0.5) * 0.1; // velocity.x (small random initial velocity)
+            treeData[offset + 4] = (Math.random() - 0.5) * 0.1; // velocity.y (small random initial velocity)
+            treeData[offset + 5] = (Math.random() - 0.5) * 0.01; // angular_velocity (small random rotation)
+            treeData[offset + 6] = 0.1; // radius
+            treeData[offset + 7] = 0; // padding[0]
+            treeData[offset + 8] = 0; // padding[1]
+            treeData[offset + 9] = 0; // padding[2]
+        }
+
+                this.device.queue.writeBuffer(this.treeBuffer, 0, treeData);
+                this.collisionCount = 0;
+                this.packRatio = 0;
+                this.needsReset = false;
+
+                this.log('Simulation reset');
+            }
+
+            resizeCanvas() {
+                const rect = this.canvas.getBoundingClientRect();
+                this.canvas.width = rect.width * window.devicePixelRatio;
+                this.canvas.height = rect.height * window.devicePixelRatio;
+                this.overlay.width = rect.width;
+                this.overlay.height = rect.height;
+
+                this.params.aspect = rect.width / rect.height;
+
+                this.log(`Canvas resized: ${this.canvas.width}x${this.canvas.height}`);
+            }
+
+            updateUniforms(deltaTime) {
+                // Calculate compression probabilities based on current bounds
+                let probX = 1.0;
+                let probY = 1.0;
+
+                if (this.params.autoPack && this.currentBounds) {
+                    const width = this.currentBounds.maxX - this.currentBounds.minX;
+                    const height = this.currentBounds.maxY - this.currentBounds.minY;
+                    const currentAspect = width / height;
+                    const targetAspect = this.params.aspect;
+
+                    if (currentAspect > targetAspect) {
+                        // Too wide, compress more in X direction
+                        probX = 1.2;
+                        probY = 0.8;
+                    } else if (currentAspect < targetAspect) {
+                        // Too tall, compress more in Y direction
+                        probX = 0.8;
+                        probY = 1.2;
+                    }
+                }
+
+                const uniforms = new Float32Array([
+                    this.params.treeCount,
+                    deltaTime,
+                    this.params.compressionForce,
+                    this.params.relaxationRate,
+                    this.params.aspect,
+                    0.0, // center_x
+                    0.0, // center_y
+                    this.frameCount,
+                    probX,
+                    probY
+                ]);
+
+                this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms);
+            }
+
+            async render() {
+                const deltaTime = 1.0 / 60.0; // Fixed timestep for stability
+
+                // Update uniforms
+                this.updateUniforms(deltaTime);
+
+                // Reset if needed
+                if (this.needsReset) {
+                    console.log('Resetting simulation...');
+                    this.resetSimulation();
+                }
+
+                // Compute pass (physics simulation)
+                const computePass = this.device.createCommandEncoder();
+                const computePassEncoder = computePass.beginComputePass();
+                computePassEncoder.setPipeline(this.computePipeline);
+                computePassEncoder.setBindGroup(0, this.computeBindGroup);
+                computePassEncoder.dispatchWorkgroups(Math.ceil(this.params.treeCount / 64));
+                computePassEncoder.end();
+
+                // Render pass
+                const renderPass = computePass.beginRenderPass({
+                    colorAttachments: [{
+                        view: this.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0.02, g: 0.02, b: 0.05, a: 1.0 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+
+        renderPass.setPipeline(this.renderPipeline);
+        renderPass.setBindGroup(0, this.renderBindGroup);
+                renderPass.setVertexBuffer(0, this.vertexBuffer);
+                renderPass.setIndexBuffer(this.indexBuffer, 'uint32');
+                renderPass.drawIndexed(this.treeIndices.length, this.params.treeCount);
+                renderPass.end();
+
+                // Submit commands
+                this.device.queue.submit([computePass.finish()]);
+
+                // Update UI
+                this.updateUI();
+
+                // Draw overlay
+                this.drawOverlay();
+            }
+
+            updateUI() {
+                this.treeCountEl.textContent = this.params.treeCount;
+                this.packRatioEl.textContent = this.packRatio.toFixed(3);
+                this.fpsEl.textContent = this.fps;
+
+                // Update perf indicator (simulated)
+                const perfFill = document.getElementById('perf-fill');
+                const load = Math.min(100, (this.params.treeCount / 2000) * 100);
+                perfFill.style.width = load + '%';
+            }
+
+            drawOverlay() {
+                const ctx = this.overlayCtx;
+                const width = this.overlay.width;
+                const height = this.overlay.height;
+
+                ctx.clearRect(0, 0, width, height);
+
+                // Draw center crosshair
+                ctx.strokeStyle = 'rgba(0, 229, 255, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(width/2 - 20, height/2);
+                ctx.lineTo(width/2 + 20, height/2);
+                ctx.moveTo(width/2, height/2 - 20);
+                ctx.lineTo(width/2, height/2 + 20);
+                ctx.stroke();
+            }
+
+            start() {
+                this.resetSimulation();
+
+                const renderLoop = async (timestamp) => {
+                    // Calculate FPS
+                    if (this.lastTime) {
+                        const delta = timestamp - this.lastTime;
+                        this.fps = Math.round(1000 / delta);
+                    }
+                    this.lastTime = timestamp;
+                    this.frameCount++;
+
+                    await this.render();
+                    requestAnimationFrame(renderLoop);
+                };
+
+                requestAnimationFrame(renderLoop);
+                console.log('Render loop started');
+                this.log('Render loop started');
+            }
+
+            log(message) {
+                console.log(`[Tree Packer] ${message}`);
+
+                if (this.debugLog) {
+                    const line = document.createElement('div');
+                    line.className = 'log-line log-info';
+                    line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                    this.debugLog.appendChild(line);
+                    this.debugLog.scrollTop = this.debugLog.scrollHeight;
+                }
+            }
+        }
+
+        // CPU-based fallback renderer for when WebGPU is unavailable
+        class CPUFallbackRenderer {
+            constructor() {
+                this.canvas = document.getElementById('gpuCanvas');
+                this.overlay = document.getElementById('overlayCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.overlayCtx = this.overlay.getContext('2d');
+
+                this.params = {
+                    treeCount: 200, // Reduced for CPU performance
+                    compressionForce: 0.1,
+                    relaxationRate: 1.0,
+                    autoPack: true,
+                    aspect: 1.0
+                };
+
+                this.trees = [];
+                this.frameCount = 0;
+                this.lastTime = 0;
+                this.fps = 0;
+
+                this.setupUI();
+                this.setupEventListeners();
+            }
+
+            setupUI() {
+                // Same UI setup as WebGPU version
+                this.treeSlider = document.getElementById('tree-slider');
+                this.treeValue = document.getElementById('tree-value');
+                this.compressSlider = document.getElementById('compress-slider');
+                this.compressValue = document.getElementById('compress-value');
+                this.relaxSlider = document.getElementById('relax-slider');
+                this.relaxValue = document.getElementById('relax-value');
+                this.autoPackBtn = document.getElementById('auto-pack-btn');
+                this.resetBtn = document.getElementById('reset-btn');
+
+                this.treeCountEl = document.getElementById('tree-count');
+                this.packRatioEl = document.getElementById('pack-ratio');
+                this.fpsEl = document.getElementById('fps');
+
+                // Update initial values
+                this.treeValue.textContent = this.params.treeCount;
+                this.compressValue.textContent = this.params.compressionForce.toFixed(2);
+                this.relaxValue.textContent = this.params.relaxationRate.toFixed(2);
+            }
+
+            setupEventListeners() {
+                this.treeSlider.addEventListener('input', (e) => {
+                    this.params.treeCount = parseInt(e.target.value);
+                    this.treeValue.textContent = this.params.treeCount;
+                    this.resetSimulation();
+                });
+
+                this.compressSlider.addEventListener('input', (e) => {
+                    this.params.compressionForce = parseFloat(e.target.value);
+                    this.compressValue.textContent = this.params.compressionForce.toFixed(2);
+                });
+
+                this.relaxSlider.addEventListener('input', (e) => {
+                    this.params.relaxationRate = parseFloat(e.target.value);
+                    this.relaxValue.textContent = this.params.relaxationRate.toFixed(2);
+                });
+
+                this.autoPackBtn.addEventListener('click', () => {
+                    this.params.autoPack = !this.params.autoPack;
+                    this.autoPackBtn.classList.toggle('active', this.params.autoPack);
+                });
+
+                this.resetBtn.addEventListener('click', () => {
+                    this.resetSimulation();
+                });
+
+                window.addEventListener('resize', () => {
+                    this.resizeCanvas();
+                });
+            }
+
+            resetSimulation() {
+                this.trees = [];
+                const radius = 1.0;
+
+                for (let i = 0; i < this.params.treeCount; i++) {
+                    const angle = (i / this.params.treeCount) * Math.PI * 2;
+                    const x = Math.cos(angle) * radius * (0.5 + Math.random() * 0.5);
+                    const y = Math.sin(angle) * radius * (0.5 + Math.random() * 0.5);
+
+                    this.trees.push({
+                        x: x,
+                        y: y,
+                        vx: (Math.random() - 0.5) * 0.1,
+                        vy: (Math.random() - 0.5) * 0.1,
+                        radius: 0.05
+                    });
+                }
+
+                console.log('CPU simulation reset with', this.params.treeCount, 'trees');
+            }
+
+            resizeCanvas() {
+                const rect = this.canvas.getBoundingClientRect();
+                this.canvas.width = rect.width;
+                this.canvas.height = rect.height;
+                this.overlay.width = rect.width;
+                this.overlay.height = rect.height;
+                this.params.aspect = rect.width / rect.height;
+            }
+
+            updatePhysics() {
+                const dt = 1.0 / 60.0;
+
+                // Update tree positions and handle collisions
+                for (let i = 0; i < this.trees.length; i++) {
+                    const tree = this.trees[i];
+
+                    // Apply forces from other trees
+                    let forceX = 0, forceY = 0;
+
+                    for (let j = 0; j < this.trees.length; j++) {
+                        if (i === j) continue;
+
+                        const other = this.trees[j];
+                        const dx = tree.x - other.x;
+                        const dy = tree.y - other.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const minDist = tree.radius + other.radius;
+
+                        if (dist < minDist && dist > 0) {
+                            // Repulsion
+                            const overlap = minDist - dist;
+                            const force = overlap * this.params.relaxationRate * 100;
+                            forceX += (dx / dist) * force;
+                            forceY += (dy / dist) * force;
+                        } else if (this.params.compressionForce > 0) {
+                            // Attraction
+                            const force = this.params.compressionForce * 10;
+                            forceX -= (dx / dist) * force;
+                            forceY -= (dy / dist) * force;
+                        }
+                    }
+
+                    // Update velocity
+                    tree.vx += forceX * dt;
+                    tree.vy += forceY * dt;
+
+                    // Dampen velocity
+                    tree.vx *= 0.95;
+                    tree.vy *= 0.95;
+
+                    // Update position
+                    tree.x += tree.vx * dt;
+                    tree.y += tree.vy * dt;
+
+                    // Keep in bounds
+                    tree.x = Math.max(-1.5, Math.min(1.5, tree.x));
+                    tree.y = Math.max(-1.5, Math.min(1.5, tree.y));
+                }
+            }
+
+            render() {
+                // Clear canvas
+                this.ctx.fillStyle = '#0a0a0a';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw trees
+                this.ctx.fillStyle = '#2ecc71';
+                this.ctx.strokeStyle = '#27ae60';
+                this.ctx.lineWidth = 1;
+
+                const scale = Math.min(this.canvas.width, this.canvas.height) / 3;
+
+                for (const tree of this.trees) {
+                    const screenX = this.canvas.width / 2 + tree.x * scale;
+                    const screenY = this.canvas.height / 2 + tree.y * scale;
+                    const screenRadius = tree.radius * scale;
+
+                    // Draw simple circle for tree
+                    this.ctx.beginPath();
+                    this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.stroke();
+                }
+            }
+
+            updateUI() {
+                this.treeCountEl.textContent = this.params.treeCount;
+                this.packRatioEl.textContent = 'CPU';
+                this.fpsEl.textContent = this.fps;
+            }
+
+            start() {
+                this.resetSimulation();
+                this.resizeCanvas();
+
+                const renderLoop = (timestamp) => {
+                    if (this.lastTime) {
+                        const delta = timestamp - this.lastTime;
+                        this.fps = Math.round(1000 / delta);
+                    }
+                    this.lastTime = timestamp;
+
+                    this.updatePhysics();
+                    this.render();
+                    this.updateUI();
+
+                    requestAnimationFrame(renderLoop);
+                };
+
+                requestAnimationFrame(renderLoop);
+                console.log('CPU-based Tree Packer started');
+            }
+        }
+
+        // Start the tree packer
+        async function main() {
+            try {
+                const renderer = new WebGPURenderer();
+                console.log('WebGPURenderer instance created');
+
+                await renderer.init();
+                console.log('WebGPURenderer initialized');
+
+                renderer.start();
+                console.log('Tree packer started successfully');
+
+            } catch (error) {
+                console.error('WebGPU initialization failed, falling back to CPU renderer:', error.message);
+
+                // Try CPU-based fallback
+                try {
+                    const cpuRenderer = new CPUFallbackRenderer();
+                    cpuRenderer.start();
+                    console.log('CPU fallback renderer started successfully');
+
+                    // Show info message about fallback mode
+                    setTimeout(() => {
+                        alert('WebGPU not available. Running in CPU fallback mode with reduced performance and simplified graphics.');
+                    }, 1000);
+
+                } catch (fallbackError) {
+                    console.error('CPU fallback also failed:', fallbackError);
+
+                    // Ultimate fallback: show error message
+                    const canvas = document.getElementById('gpuCanvas');
+                    if (canvas) {
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = 800;
+                        canvas.height = 600;
+                        ctx.fillStyle = '#2a2a2a';
+                        ctx.fillRect(0, 0, 800, 600);
+                        ctx.fillStyle = '#ff6b6b';
+                        ctx.font = 'bold 18px Arial';
+                        ctx.fillText('Tree Packer - All Rendering Methods Failed', 50, 50);
+
+                        ctx.fillStyle = 'white';
+                        ctx.font = '14px Arial';
+                        let yPos = 90;
+
+                        if (error.message.includes('not supported')) {
+                            ctx.fillText('❌ WebGPU is not supported in this browser', 50, yPos);
+                            yPos += 25;
+                            ctx.fillText('• Try Chrome 113+ or Edge 113+', 50, yPos);
+                            yPos += 20;
+                            ctx.fillText('• Enable WebGPU in chrome://flags/#enable-webgpu-developer-features', 50, yPos);
+                        } else if (error.message.includes('No WebGPU adapter')) {
+                            ctx.fillText('❌ No WebGPU adapter found', 50, yPos);
+                            yPos += 25;
+                            ctx.fillText('• Your browser supports WebGPU but no compatible GPU was found', 50, yPos);
+                            yPos += 20;
+                            ctx.fillText('• Try updating your graphics drivers', 50, yPos);
+                            yPos += 20;
+                            ctx.fillText('• Some virtual machines don\'t support WebGPU', 50, yPos);
+                        } else {
+                            ctx.fillText('❌ Unknown error occurred', 50, yPos);
+                            yPos += 25;
+                            ctx.fillText('Check browser console for technical details', 50, yPos);
+                        }
+                    }
+                }
+            }
+        }
+
+</body>
+</html></contents>
+</xai:function_call name="write">
+<parameter name="file_path">demos/packing2/tree-packer.js

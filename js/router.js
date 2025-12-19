@@ -103,6 +103,12 @@ class Router {
             await this.loadSwarmDemo(container);
         } else if (demo === 'christmas-tree') {
             await this.loadChristmasTreeDemo(container);
+        } else if (demo === 'packing') {
+            await this.loadPackingDemo(container);
+        } else if (demo === 'packing2') {
+            await this.loadPacking2Demo(container);
+        } else if (demo === 'original-packing') {
+            await this.loadOriginalPackingDemo(container);
         }
     }
 
@@ -120,6 +126,36 @@ class Router {
         // Create iframe to load the Christmas tree demo
         const iframe = document.createElement('iframe');
         iframe.src = 'demos/christmas-tree/index.html';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        container.appendChild(iframe);
+    }
+
+    async loadPackingDemo(container) {
+        // Create iframe to load the packing demo
+        const iframe = document.createElement('iframe');
+        iframe.src = 'demos/packing/index.html';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        container.appendChild(iframe);
+    }
+
+    async loadPacking2Demo(container) {
+        // Create iframe to load the advanced packing demo
+        const iframe = document.createElement('iframe');
+        iframe.src = 'demos/packing2/index.html';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        container.appendChild(iframe);
+    }
+
+    async loadOriginalPackingDemo(container) {
+        // Create iframe to load the original working packing demo
+        const iframe = document.createElement('iframe');
+        iframe.src = 'demos/packing2/original_working.html';
         iframe.style.width = '100%';
         iframe.style.height = '100%';
         iframe.style.border = 'none';

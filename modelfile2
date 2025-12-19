@@ -1,0 +1,2 @@
+FROM MichelRosselli/apriel-1.5-15b-thinker:latest
+PARAMETER num_ctx 32768

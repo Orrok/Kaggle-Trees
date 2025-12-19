@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGPU Tree Packer</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #050505; 
+            color: #fff; 
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; 
+            overflow: hidden; 
+            touch-action: none; 
+        }
+        
+        #layer-container { position: relative; width: 100vw; height: 100vh; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #gpuCanvas { z-index: 1; }
+        #overlayCanvas { z-index: 2; pointer-events: none; }
+        
+        /* DEBUG HUD (Compact) */
+        #debug-panel {
+            position: absolute; top: 70px; left: 10px;
+            width: 280px; max-height: 200px;
+            background: rgba(10, 10, 10, 0.85);
+            border: 1px solid #333; border-radius: 8px;
+            padding: 10px; z-index: 50;
+            overflow-y: auto; font-family: 'Consolas', monospace; font-size: 11px;
+            display: none; 
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .log-line { margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 2px; word-wrap: break-word; }
+        .log-info { color: #aaa; }
+        .log-success { color: #4fd1c5; font-weight: bold; }
+        .log-warn { color: #f6ad55; }
+        .log-error { color: #ff5555; font-weight: bold; }
+
+        #close-debug {
+            float: right; margin-left: 10px;
+            background: #444; border: none; color: white;
+            padding: 2px 8px; cursor: pointer; font-size: 10px;
+            border-radius: 4px;
+        }
+        #close-debug:hover { background: #666; }
+
+        /* HUD - TOP BAR */
+        #top-bar {
+            position: absolute; top: 0; left: 0; width: 100%;
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            display: flex; justify-content: center; gap: 40px;
+            padding: 15px 0 40px 0; z-index: 20; pointer-events: none;
+        }
+        .hud-item { text-align: center; }
+        .hud-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1.5px; display: block; margin-bottom: 2px; text-shadow: 0 1px 2px #000;}
+        .hud-val { font-size: 18px; font-weight: 700; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.8); font-variant-numeric: tabular-nums; }
+        
+        /* BOTTOM CONTROLS */
+        #bottom-bar {
+            position: absolute; bottom: 0; left: 0; width: 100%;
+            background: rgba(15, 15, 15, 0.8); border-top: 1px solid #333;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 15px 20px; box-sizing: border-box; z-index: 30;
+            backdrop-filter: blur(10px);
+            padding-bottom: calc(15px + env(safe-area-inset-bottom));
+        }
+        .btn-group { display: flex; gap: 12px; flex-grow: 1; justify-content: center; }
+        button {
+            background: #2a2a2a; color: #e0e0e0; border: 1px solid #444;
+            padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center;
+            min-width: 44px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            -webkit-tap-highlight-color: transparent;
+        }
+        button:hover { background: #3a3a3a; border-color: #666; }
+        button:active { background: #4fd1c5; color: #000; border-color: #4fd1c5; transform: scale(0.96); }
+        button.primary { background: #2c5282; border-color: #4299e1; color: white; flex-grow: 1; max-width: 160px; }
+        button.primary:hover { background: #3182ce; }
+        button.icon-btn { padding: 0; width: 48px; height: 48px; flex-grow: 0; font-size: 20px; }
+
+        /* SETTINGS PANEL */
+        #settings-panel {
+            position: absolute; bottom: 90px; left: 20px; right: 20px;
+            background: rgba(20, 20, 20, 0.95); border: 1px solid #444; border-radius: 12px;
+            padding: 20px; z-index: 100; max-width: 360px; margin: 0 auto;
+            transform: translateY(120%); transition: transform 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+        }
+        #settings-panel.visible { transform: translateY(0); }
+        
+        input[type="range"] { 
+            width: 100%; margin: 10px 0; cursor: pointer; accent-color: #4fd1c5; 
+            height: 4px; background: #444; border-radius: 2px; appearance: none; 
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none; width: 16px; height: 16px; background: #4fd1c5; border-radius: 50%;
+        }
+        
+        input[type="number"] { 
+            background: #111; border: 1px solid #444; color: #fff; 
+            padding: 8px; border-radius: 6px; width: 80px; font-size: 14px; text-align: center; 
+        }
+        
+        .setting-row { margin-bottom: 20px; }
+        .setting-row:last-child { margin-bottom: 0; }
+        .setting-label { font-size: 11px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; margin-bottom: 8px; }
+        .setting-val-display { color: #4fd1c5; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; color: #ccc; font-size: 14px; cursor: pointer; }
+        input[type="checkbox"] {
+            appearance: none; width: 18px; height: 18px; border: 2px solid #555; border-radius: 4px; background: #111;
+            display: grid; place-content: center; margin: 0;
+        }
+        input[type="checkbox"]::before {
+            content: ""; width: 10px; height: 10px; transform: scale(0); transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em #4fd1c5; transform-origin: center; clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+        input[type="checkbox"]:checked::before { transform: scale(1); }
+        input[type="checkbox"]:checked { border-color: #4fd1c5; }
+
+        #loader {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: #050505; z-index: 200; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #333; border-top: 4px solid #4fd1c5;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hide-loader { opacity: 0; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="loader">
+    <div class="spinner"></div>
+    <div style="color: #666; font-size: 14px; letter-spacing: 1px;">INITIALIZING WEBGPU</div>
+</div>
+
+<div id="debug-panel">
+    <button id="close-debug">✕</button>
+    <div id="debug-content"></div>
+</div>
+
+<div id="top-bar">
+    <div class="hud-item"><span class="hud-label">FPS</span><span class="hud-val" id="hudFPS">0</span></div>
+    <div class="hud-item"><span class="hud-label">Count</span><span class="hud-val" id="hudCount">0</span></div>
+</div>
+
+<div id="settings-panel">
+    <div class="setting-row">
+        <span class="setting-label">Tree Count (Max 500)</span>
+        <div style="display:flex; gap:10px;">
+            <input type="number" id="nInput" value="50" min="2" max="500">
+            <button id="btnSpawnSettings" style="flex-grow:1; padding: 8px;">Respawn</button>
+        </div>
+    </div>
+    <div class="setting-row">
+        <span class="setting-label">Gravity / Compression <span id="valComp" class="setting-val-display">1.0</span></span>
+        <input type="range" id="rngComp" min="0.0" max="5.0" step="0.1" value="1.0">
+    </div>
+    <div class="setting-row">
+        <span class="setting-label">Visualization</span>
+        <label class="checkbox-wrapper">
+            <input type="checkbox" id="chkSDF"> Show SDF Background
+        </label>
+    </div>
+</div>
+
+<div id="bottom-bar">
+    <button class="icon-btn" id="btnSettings" title="Settings">⚙️</button>
+    <div class="btn-group">
+        <button id="btnRestart" class="icon-btn" title="Restart">↺</button>
+        <button id="btnPlay" class="primary">⏸ PAUSE</button>
+        <button id="btnStep" class="icon-btn" title="Step Frame">⟫</button>
+    </div>
+</div>
+
+<div id="layer-container">
+    <canvas id="gpuCanvas"></canvas>
+    <canvas id="overlayCanvas"></canvas>
+</div>
+
+<script type="module">
+    // --- DEBUG SYSTEM ---
+    const debugContent = document.getElementById('debug-content');
+    const debugPanel = document.getElementById('debug-panel');
+    let frameCounter = 0;
+    let lastFpsTime = performance.now();
+
+    function log(msg, type = 'info') {
+        const div = document.createElement('div');
+        div.className = `log-line log-${type}`;
+        div.textContent = `> ${msg}`;
+        debugContent.appendChild(div);
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+        
+        if(type === 'error') {
+            debugPanel.style.display = 'block';
+            console.error(msg);
+        } else if (type === 'success') {
+            console.log(`%c${msg}`, 'color: #4fd1c5; font-weight: bold;');
+        } else {
+            console.log(msg);
+        }
+    }
+
+    document.getElementById('close-debug').onclick = () => {
+        debugPanel.style.display = 'none';
+    };
+
+    window.onerror = function(msg, url, line) {
+        log(`${msg}`, 'error');
+        document.getElementById('loader').innerHTML = `<div style="color:#ff5555; text-align:center; padding:20px;">Error:<br>${msg}</div>`;
+        return false;
+    };
+
+    // --- GLOBAL STATE ---
+    let device, context;
+    let pipelines = {};
+    let buffers = {};
+    let bindGroups = {};
+    let textures = {}; 
+    
+    let isPlaying = true;
+    let nParticles = 0;
+    let frameId = 0;
+    
+    const FLOATS_PER_TREE = 8; 
+    const SDF_SIZE = 1024;
+
+    const treePoly = [
+        {x:0.0, y:0.8}, {x:0.125, y:0.5}, {x:0.0625, y:0.5}, {x:0.2, y:0.25},
+        {x:0.1, y:0.25}, {x:0.35, y:0.0}, {x:0.075, y:0.0}, {x:0.075, y:-0.2},
+        {x:-0.075, y:-0.2}, {x:-0.075, y:0.0}, {x:-0.35, y:0.0}, {x:-0.1, y:0.25},
+        {x:-0.2, y:0.25}, {x:-0.0625, y:0.5}, {x:-0.125, y:0.5}, {x:0.0, y:0.8}
+    ];
+
+    // --- WGSL SHADERS ---
+
+    // Define parts separately to avoid splitting issues
+    const STRUCT_DEFS = `
+        struct Tree { pos: vec2<f32>, vel: vec2<f32>, rot: f32, ang_vel: f32, col: f32, _pad: f32 };
+        struct Params { zoom: f32, compression: f32, probX: f32, time: f32, aspect: f32, _p1: f32, _p2: f32, _p3: f32 };
+    `;
+
+    const POLY_DEF = `
+        // Hardcoded 16-point polygon (Tree Shape)
+        var<private> tree_poly: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+            vec2<f32>(0.0, 0.8), vec2<f32>(0.125, 0.5), vec2<f32>(0.0625, 0.5), vec2<f32>(0.2, 0.25),
+            vec2<f32>(0.1, 0.25), vec2<f32>(0.35, 0.0), vec2<f32>(0.075, 0.0), vec2<f32>(0.075, -0.2),
+            vec2<f32>(-0.075, -0.2), vec2<f32>(-0.075, 0.0), vec2<f32>(-0.35, 0.0), vec2<f32>(-0.1, 0.25),
+            vec2<f32>(-0.2, 0.25), vec2<f32>(-0.0625, 0.5), vec2<f32>(-0.125, 0.5), vec2<f32>(0.0, 0.8)
+        );
+    `;
+
+    const COMMON_WGSL = STRUCT_DEFS + POLY_DEF;
+
+    // 1. Compute Shader: Generates the SDF Texture (One-time)
+    const SDF_GEN_CODE = `
+        @group(0) @binding(0) var sdf_tex: texture_storage_2d<r32float, write>;
+        ${POLY_DEF}
+
+        fn sdSegment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+            let pa = p - a; let ba = b - a;
+            let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+            return length(pa - ba * h);
+        }
+
+        fn isInside(p: vec2<f32>) -> bool {
+            var wn = 0;
+            for (var i = 0u; i < 15u; i++) {
+                let a = tree_poly[i]; let b = tree_poly[i+1];
+                if (a.y <= p.y) { 
+                    if (b.y > p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) > 0.0) { wn++; } 
+                } else { 
+                    if (b.y <= p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) < 0.0) { wn--; } 
+                }
+            }
+            return wn != 0;
+        }
+
+        @compute @workgroup_size(8, 8)
+        fn main(@builtin(global_invocation_id) id: vec3u) {
+            let dims = vec2<f32>(textureDimensions(sdf_tex));
+            if (id.x >= u32(dims.x) || id.y >= u32(dims.y)) { return; }
+            
+            let uv = vec2<f32>(id.xy) / dims;
+            let p = (uv * 2.0 - 1.0) * 1.2; 
+            
+            var d = 1000.0;
+            for (var i = 0u; i < 15u; i++) { d = min(d, sdSegment(p, tree_poly[i], tree_poly[i+1])); }
+            
+            if (isInside(p)) { d = -d; }
+            
+            textureStore(sdf_tex, id.xy, vec4<f32>(d, 0.0, 0.0, 0.0));
+        }
+    `;
+
+    // 2. Render Shader: Visualizes the SDF (Background)
+    const SDF_VIS_CODE = `
+        struct VSOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+        
+        @vertex fn vs(@builtin(vertex_index) vi: u32) -> VSOut {
+            var p = vec2<f32>(-1.0, -1.0);
+            if (vi==1u) { p = vec2<f32>(3.0, -1.0); }
+            if (vi==2u) { p = vec2<f32>(-1.0, 3.0); }
+            var out: VSOut;
+            out.pos = vec4<f32>(p, 0.0, 1.0);
+            out.uv = p * 0.5 + 0.5;
+            return out;
+        }
+        
+        @group(0) @binding(0) var tex: texture_2d<f32>;
+        @group(0) @binding(1) var samp: sampler;
+        
+        @fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+            let dist = textureSample(tex, samp, uv).r;
+            var c = vec3<f32>(0.05); 
+            
+            if (dist < 0.0) {
+                let v = smoothstep(0.0, -0.2, dist);
+                c = mix(vec3<f32>(0.1, 0.1, 0.1), vec3<f32>(0.2, 0.0, 0.0), v);
+            } else {
+                let wave = sin(dist * 150.0 - 1.0);
+                let alpha = 1.0 / (1.0 + dist * 5.0);
+                c = mix(vec3<f32>(0.05), vec3<f32>(0.0, 0.1, 0.15), (0.2 + 0.3*wave) * alpha);
+            }
+            return vec4<f32>(c, 1.0);
+        }
+    `;
+
+    // 3. Compute Shader: Physics & Collision
+    const COMPUTE_CODE = `
+        ${COMMON_WGSL}
+        @group(0) @binding(0) var<storage, read_write> trees: array<Tree>;
+        @group(0) @binding(1) var<uniform> params: Params;
+
+        fn hash(u: u32) -> f32 {
+            var x = u * 747796405u + 2891336453u;
+            x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+            return f32((x ^ (x >> 22u))) / 4294967295.0;
+        }
+
+        fn sdSegment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+            let pa = p - a; let ba = b - a;
+            let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+            return length(pa - ba * h);
+        }
+
+        fn isInside(p: vec2<f32>) -> bool {
+            var wn = 0;
+            for (var i = 0u; i < 15u; i++) {
+                let a = tree_poly[i]; let b = tree_poly[i+1];
+                if (a.y <= p.y) { 
+                    if (b.y > p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) > 0.0) { wn++; } 
+                } else { 
+                    if (b.y <= p.y && (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) < 0.0) { wn--; } 
+                }
+            }
+            return wn != 0;
+        }
+
+        @compute @workgroup_size(64)
+        fn main(@builtin(global_invocation_id) id: vec3u) {
+            let i = id.x;
+            if (i >= arrayLength(&trees)) { return; }
+            var t = trees[i];
+
+            let rnd = hash(i + u32(params.time)); 
+            let gravity_strength = clamp(params.compression * 0.01, 0.0, 0.5);
+            let center_dir = -normalize(t.pos);
+            let dist_center = length(t.pos);
+            
+            if (dist_center > 0.1) {
+                t.vel += center_dir * gravity_strength;
+                t.vel.x += (hash(i * 13u + u32(params.time)) - 0.5) * gravity_strength * 2.0;
+                t.vel.y += (hash(i * 7u + u32(params.time)) - 0.5) * gravity_strength * 2.0;
+            }
+
+            let search_rad = 2.5; 
+            let count = arrayLength(&trees);
+            t.col = 0.0; 
+
+            if (length(t.pos) < 50.0) {
+                for (var j = 0u; j < count; j++) {
+                    if (i == j) { continue; }
+                    let other = trees[j];
+                    
+                    if (distance(t.pos, other.pos) > search_rad) { continue; }
+
+                    let c = cos(-other.rot); let s = sin(-other.rot);
+                    for (var v = 0u; v < 15u; v++) {
+                        let my_local = tree_poly[v];
+                        let mc = cos(t.rot); let ms = sin(t.rot);
+                        let my_world = t.pos + vec2<f32>(my_local.x * mc - my_local.y * ms, my_local.x * ms + my_local.y * mc);
+                        let diff = my_world - other.pos;
+                        let other_local = vec2<f32>(diff.x * c - diff.y * s, diff.x * s + diff.y * c);
+                        
+                        var dist = 1000.0;
+                        for (var k = 0u; k < 15u; k++) { dist = min(dist, sdSegment(other_local, tree_poly[k], tree_poly[k+1])); }
+                        if (isInside(other_local)) { dist = -dist; }
+                        
+                        if (dist < 0.05) {
+                            t.col = 1.0;
+                            let contact = normalize(my_world - other.pos);
+                            let force = min((0.05 - dist) * 20.0, 2.0); 
+                            t.vel += contact * force;
+                            let arm = my_world - t.pos;
+                            let torque = (arm.x * contact.y - arm.y * contact.x);
+                            t.ang_vel += clamp(torque * force * 5.0, -2.0, 2.0);
+                        }
+                    }
+                }
+            }
+
+            let dt = 0.016;
+            t.vel *= 0.92; 
+            t.ang_vel *= 0.90;
+            if (length(t.vel) > 3.0) { t.vel = normalize(t.vel) * 3.0; }
+            t.pos += t.vel * dt;
+            t.ang_vel = clamp(t.ang_vel, -10.0, 10.0); 
+            t.rot += t.ang_vel * dt;
+            trees[i] = t;
+        }
+    `;
+
+    // 4. Vertex/Fragment Shader: Renders the Trees
+    const VERTEX_CODE = `
+        ${COMMON_WGSL}
+        @group(0) @binding(0) var<storage, read> trees: array<Tree>;
+        @group(0) @binding(1) var<uniform> params: Params;
+        
+        struct VertexOut { 
+            @builtin(position) pos: vec4<f32>, 
+            @location(0) color: vec4<f32>,
+            @location(1) bary: vec3<f32> 
+        };
+
+        @vertex fn vert(@builtin(vertex_index) vIdx: u32, @builtin(instance_index) iIdx: u32) -> VertexOut {
+            let t = trees[iIdx];
+            let tri_idx = vIdx / 3u; 
+            let vert_in_tri = vIdx % 3u; 
+            
+            var local = vec2<f32>(0.0, 0.0); 
+            var bary = vec3<f32>(1.0, 0.0, 0.0);
+
+            if (vert_in_tri == 1u) { 
+                local = tree_poly[tri_idx]; 
+                bary = vec3<f32>(0.0, 1.0, 0.0);
+            }
+            if (vert_in_tri == 2u) { 
+                local = tree_poly[(tri_idx + 1u) % 16u]; 
+                bary = vec3<f32>(0.0, 0.0, 1.0);
+            }
+
+            let c = cos(t.rot); let s = sin(t.rot);
+            let world = t.pos + vec2<f32>(local.x * c - local.y * s, local.x * s + local.y * c);
+            let aspect_vec = vec2<f32>(1.0 / params.aspect, 1.0);
+            
+            var out: VertexOut;
+            out.pos = vec4<f32>(world * params.zoom * 0.1 * aspect_vec, 0.0, 1.0);
+            out.bary = bary;
+            
+            if (t.col > 0.5) { 
+                out.color = vec4<f32>(1.0, 0.3, 0.3, 1.0); 
+            } else { 
+                let speed = length(t.vel); 
+                let green = clamp(0.4 + speed * 0.5, 0.4, 1.0);
+                out.color = vec4<f32>(0.2, green, 0.4, 1.0); 
+            }
+            return out;
+        }
+        
+        @fragment fn frag(@location(0) color: vec4<f32>, @location(1) bary: vec3<f32>) -> @location(0) vec4<f32> { 
+            let min_bary = min(min(bary.x, bary.y), bary.z);
+            let edge = smoothstep(0.02, 0.05, min_bary);
+            return mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), color, edge); 
+        }
+    `;
+
+    async function createModule(code, label) {
+        const mod = device.createShaderModule({ code });
+        const info = await mod.getCompilationInfo();
+        if(info.messages.some(m => m.type === 'error')) {
+            info.messages.forEach(m => log(`${label} Error: ${m.message} (Line ${m.lineNum})`, "error"));
+            throw new Error(`${label} Compilation Failed. See logs.`);
+        }
+        return mod;
+    }
+
+    async function init() {
+        log("Checking GPU support...");
+        if (!navigator.gpu) {
+            document.getElementById('loader').innerHTML = `<div style="color:white; text-align:center;">WebGPU not supported by this browser.<br>Try Chrome, Edge, or Firefox Nightly.</div>`;
+            return log("❌ navigator.gpu undefined.", "error");
+        }
+        
+        try {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) throw new Error("No GPU adapter found.");
+            
+            device = await adapter.requestDevice();
+            
+            device.lost.then((info) => {
+                log(`❌ Device Lost: ${info.message}`, "error");
+                cancelAnimationFrame(animationReq);
+            });
+
+            const canvas = document.getElementById('gpuCanvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            context = canvas.getContext('webgpu');
+            const format = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({ device, format, alphaMode: 'premultiplied' });
+
+            buffers.params = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+            const compModule = await createModule(COMPUTE_CODE, "Compute");
+            const vertModule = await createModule(VERTEX_CODE, "Vertex");
+            const visModule = await createModule(SDF_VIS_CODE, "SDF Viz");
+
+            pipelines.compute = device.createComputePipeline({
+                layout: 'auto', compute: { module: compModule, entryPoint: 'main' }
+            });
+
+            pipelines.render = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: { module: vertModule, entryPoint: 'vert' },
+                fragment: { module: vertModule, entryPoint: 'frag', targets: [{ 
+                    format,
+                    blend: {
+                        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add'},
+                        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add'}
+                    }
+                }] },
+                primitive: { topology: 'triangle-list' } 
+            });
+
+            pipelines.sdfVis = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: { module: visModule, entryPoint: 'vs' },
+                fragment: { module: visModule, entryPoint: 'fs', targets: [{ format }] },
+                primitive: { topology: 'triangle-list' }
+            });
+
+            log("Generating SDF...");
+            await generateSDF();
+            
+            bindGroups.sdfVis = device.createBindGroup({
+                layout: pipelines.sdfVis.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: textures.sdf.createView() }, 
+                    { binding: 1, resource: textures.sampler }
+                ]
+            });
+
+            document.getElementById('loader').classList.add('hide-loader');
+            spawn(50);
+            updateHUD();
+            loop();
+            log("Ready.", "success");
+
+        } catch(e) {
+            log(`❌ Init Error: ${e.message}`, "error");
+            console.error(e);
+            document.getElementById('loader').innerHTML = `<div style="color:#ff5555; text-align:center; padding:20px; font-family:monospace; background:rgba(0,0,0,0.8); border-radius:8px;">Error:<br>${e.message}<br><br><small>Check Debug Console for details</small></div>`;
+        }
+    }
+
+    async function generateSDF() {
+        const module = await createModule(SDF_GEN_CODE, "SDF Gen");
+        const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+        
+        textures.sdf = device.createTexture({ 
+            size: [SDF_SIZE, SDF_SIZE], format: 'r32float', 
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+        });
+        textures.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+
+        const bg = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: textures.sdf.createView() }] });
+        
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(pipeline); pass.setBindGroup(0, bg);
+        pass.dispatchWorkgroups(SDF_SIZE/8, SDF_SIZE/8);
+        pass.end();
+        device.queue.submit([enc.finish()]);
+    }
+
+    function spawn(count) {
+        log(`Spawning ${count} trees...`);
+        nParticles = count;
+        frameId = 0;
+        
+        const data = new Float32Array(count * FLOATS_PER_TREE); 
+        const spread = Math.sqrt(count) * 1.5; 
+        for (let i = 0; i < count; i++) {
+            const idx = i * FLOATS_PER_TREE;
+            data[idx+0] = (Math.random()-0.5) * spread * 2.0; 
+            data[idx+1] = (Math.random()-0.5) * spread * 2.0; 
+            data[idx+2] = (Math.random()-0.5) * 0.1; 
+            data[idx+3] = (Math.random()-0.5) * 0.1; 
+            data[idx+4] = Math.random() * 6.28; 
+        }
+
+        if (buffers.work) buffers.work.destroy();
+        buffers.work = device.createBuffer({
+            size: data.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: true
+        });
+        new Float32Array(buffers.work.getMappedRange()).set(data);
+        buffers.work.unmap();
+
+        bindGroups.compute = device.createBindGroup({
+            layout: pipelines.compute.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: buffers.work } },
+                { binding: 1, resource: { buffer: buffers.params } }
+            ]
+        });
+
+        bindGroups.render = device.createBindGroup({
+            layout: pipelines.render.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: buffers.work } },
+                { binding: 1, resource: { buffer: buffers.params } }
+            ]
+        });
+        
+        document.getElementById('hudCount').innerText = count;
+    }
+
+    function updateParams() {
+        const zoom = 2.0; 
+        const comp = parseFloat(document.getElementById('rngComp').value);
+        const aspect = window.innerWidth / window.innerHeight;
+        const safeAspect = (aspect && isFinite(aspect) && aspect > 0) ? aspect : 1.0;
+        const time = performance.now() * 0.001;
+        
+        const data = new Float32Array([zoom, comp, 0.5, time, safeAspect, 0, 0, 0]);
+        device.queue.writeBuffer(buffers.params, 0, data);
+        
+        document.getElementById('valComp').innerText = comp.toFixed(1);
+    }
+
+    let animationReq;
+    function loop() {
+        frameCounter++;
+        updateParams();
+        frameId++;
+        
+        const showSDF = document.getElementById('chkSDF').checked;
+
+        const enc = device.createCommandEncoder();
+        
+        if (isPlaying) {
+            const pass = enc.beginComputePass();
+            pass.setPipeline(pipelines.compute);
+            pass.setBindGroup(0, bindGroups.compute);
+            pass.dispatchWorkgroups(Math.ceil(nParticles/64));
+            pass.end();
+        }
+
+        const pass = enc.beginRenderPass({
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                clearValue: { r: 0.05, g: 0.05, b: 0.05, a: 1.0 }, 
+                loadOp: 'clear', storeOp: 'store'
+            }]
+        });
+        
+        if (showSDF) {
+             pass.setPipeline(pipelines.sdfVis);
+             pass.setBindGroup(0, bindGroups.sdfVis);
+             pass.draw(3);
+        }
+
+        pass.setPipeline(pipelines.render);
+        pass.setBindGroup(0, bindGroups.render);
+        pass.draw(15 * 3, nParticles); 
+        pass.end();
+        
+        device.queue.submit([enc.finish()]);
+        
+        animationReq = requestAnimationFrame(loop);
+    }
+
+    function updateHUD() {
+        const now = performance.now();
+        const fps = Math.round(frameCounter * 1000 / (now - lastFpsTime));
+        document.getElementById('hudFPS').innerText = fps;
+        frameCounter = 0;
+        lastFpsTime = now;
+        setTimeout(updateHUD, 1000);
+    }
+
+    const settingsPanel = document.getElementById('settings-panel');
+    const playBtn = document.getElementById('btnPlay');
+    
+    document.getElementById('btnSettings').onclick = () => { 
+        settingsPanel.classList.toggle('visible'); 
+    };
+    
+    document.getElementById('btnRestart').onclick = () => spawn(parseInt(document.getElementById('nInput').value));
+    
+    document.getElementById('btnSpawnSettings').onclick = () => {
+        spawn(parseInt(document.getElementById('nInput').value));
+    };
+    
+    playBtn.onclick = () => { 
+        isPlaying = !isPlaying;
+        playBtn.innerText = isPlaying ? "⏸ PAUSE" : "▶ PLAY";
+        playBtn.classList.toggle('primary');
+    };
+    
+    document.getElementById('btnStep').onclick = () => { 
+        isPlaying = false;
+        playBtn.innerText = "▶ PLAY";
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(pipelines.compute);
+        pass.setBindGroup(0, bindGroups.compute);
+        pass.dispatchWorkgroups(Math.ceil(nParticles/64));
+        pass.end();
+        device.queue.submit([enc.finish()]);
+    };
+
+    window.onresize = () => {
+        if (!device) return;
+        const canvas = document.getElementById('gpuCanvas');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.configure({ 
+            device, 
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            alphaMode: 'premultiplied'
+        });
+    };
+
+    init();
+
+</script>
+</body>
+</html>

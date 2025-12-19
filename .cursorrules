@@ -1,0 +1,39 @@
+# Cursor Rules for Kaggle Trees Project
+
+## Project Type
+This is a set of **static webpages** built with JavaScript and CSS. **No server-side components** are allowed.
+
+## Technology Stack
+- HTML5
+- JavaScript (ES6+ modules)
+- CSS
+- WebGPU (for graphics/simulation)
+- WebGL/WebAssembly (where applicable)
+
+## Constraints
+- All code must run entirely in the browser
+- No Node.js server
+- No backend APIs
+- No database connections
+- No server-side rendering
+- No build tools that require server execution
+- All assets must be served statically
+
+## File Structure
+- `index.html` - Main entry point
+- `demos/` - Individual demo applications
+- `js/` - Shared JavaScript modules
+- `shaders/` - WebGPU/WebGL shaders
+- Static assets only
+
+## Development Guidelines
+- Focus on client-side performance optimization
+- Use modern web APIs (WebGPU, Web Workers, etc.)
+- Ensure cross-browser compatibility where possible
+- Keep bundle sizes minimal for fast loading
+- Prefer vanilla JavaScript over heavy frameworks
+
+## Deployment
+- Can be deployed to any static hosting service (GitHub Pages, Netlify, etc.)
+- No build process required beyond file copying
+- All dependencies must be CDN-hosted or bundled as static files

@@ -201,6 +201,9 @@
             <a href="#" class="nav-item" data-demo="home">Home</a>
             <a href="#" class="nav-item" data-demo="swarm">Particle Swarm</a>
             <a href="#" class="nav-item" data-demo="christmas-tree">Christmas Tree</a>
+            <a href="#" class="nav-item" data-demo="packing">Tree Packing</a>
+            <a href="#" class="nav-item" data-demo="packing2">Advanced Packing</a>
+            <a href="#" class="nav-item" data-demo="original-packing">Original Working</a>
         </div>
         <div id="back-nav">
             <button id="back-btn">← Back to Home</button>
@@ -219,10 +222,25 @@
                     <h2>✨ Particle Swarm</h2>
                     <p>Interactive particle simulation with physics-based movement, touch interaction, and dynamic coloring.</p>
                 </div>
-                
+
                 <div class="demo-card" data-demo="christmas-tree">
                     <h2>🎄 Static Christmas Tree</h2>
                     <p>A beautiful 15-line reference Kaggle Christmas tree rendered with WebGPU.</p>
+                </div>
+
+                <div class="demo-card" data-demo="packing">
+                    <h2>🌲 Tree Packing</h2>
+                    <p>Physics-based tree packing simulation with collision detection, gravity compression, and SDF background visualization.</p>
+                </div>
+
+                <div class="demo-card" data-demo="packing2">
+                    <h2>🚀 Advanced Tree Packing</h2>
+                    <p>Sophisticated WebGPU implementation with O(N²) physics simulation, instanced rendering, and CPU-controlled optimization loop.</p>
+                </div>
+
+                <div class="demo-card" data-demo="original-packing">
+                    <h2>🎯 Original Working Packing</h2>
+                    <p>The original working WebGPU tree packing implementation with graph visualization and real-time optimization feedback.</p>
                 </div>
             </div>
         </div>
@@ -230,6 +248,9 @@
         <!-- Demo Containers -->
         <div id="demo-swarm" class="demo-container"></div>
         <div id="demo-christmas-tree" class="demo-container"></div>
+        <div id="demo-packing" class="demo-container"></div>
+        <div id="demo-packing2" class="demo-container"></div>
+        <div id="demo-original-packing" class="demo-container"></div>
     </div>
 
     <script type="module" src="js/router.js"></script>
